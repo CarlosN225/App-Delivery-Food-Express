@@ -2,7 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.routers import auth
+from app import models
+from app.routers import auth, restaurantes, productos, pedidos
+
+
+Base.metadata.create_all(bind=engine)
+
 
 # Crea las tablas automáticamente si no existen (suficiente para desarrollo;
 # para producción se recomendaría manejar migraciones con Alembic).
@@ -26,6 +31,9 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(restaurantes.router)
+app.include_router(productos.router)
+app.include_router(pedidos.router)
 
 
 @app.get("/", tags=["Salud"])
