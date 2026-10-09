@@ -4,40 +4,52 @@ from app.models.restaurante import Restaurante
 
 db = SessionLocal()
 
+# Datos de prueba ubicados en Nicolás Romero, Edo. Méx. (direcciones ficticias)
 restaurantes = [
-    Restaurante(
-        nombre="Pizza Express",
-        direccion="Av. Insurgentes Sur 100",
-        categoria="Pizza",
-        latitud="19.4326",
-        longitud="-99.1332",
-    ),
-    Restaurante(
-        nombre="Hamburguesas El Buen Sabor",
-        direccion="Av. Reforma 250",
-        categoria="Hamburguesas",
-        latitud="19.4350",
-        longitud="-99.1400",
-    ),
-    Restaurante(
-        nombre="Tacos Don Juan",
-        direccion="Calle Juárez 50",
-        categoria="Mexicana",
-        latitud="19.4250",
-        longitud="-99.1250",
-    ),
-    Restaurante(
-        nombre="Sushi House",
-        direccion="Av. Chapultepec 300",
-        categoria="Sushi",
-        latitud="19.4280",
-        longitud="-99.1450",
-    ),
+    {
+        "nombre": "Pizza Express",
+        "direccion": "Calle Hidalgo 100, Nicolás Romero",
+        "categoria": "Pizza",
+        "latitud": "19.6010",
+        "longitud": "-99.3085",
+    },
+    {
+        "nombre": "Hamburguesas El Buen Sabor",
+        "direccion": "Av. Independencia 250, Nicolás Romero",
+        "categoria": "Hamburguesas",
+        "latitud": "19.6045",
+        "longitud": "-99.3150",
+    },
+    {
+        "nombre": "Tacos Don Juan",
+        "direccion": "Calle Juárez 50, Nicolás Romero",
+        "categoria": "Mexicana",
+        "latitud": "19.5950",
+        "longitud": "-99.3200",
+    },
+    {
+        "nombre": "Sushi House",
+        "direccion": "Av. Morelos 300, Nicolás Romero",
+        "categoria": "Sushi",
+        "latitud": "19.6100",
+        "longitud": "-99.3050",
+    },
 ]
 
 
-for restaurante in restaurantes:
-    db.add(restaurante)
+for datos in restaurantes:
+    existente = (
+        db.query(Restaurante)
+        .filter(Restaurante.nombre == datos["nombre"])
+        .first()
+    )
+    if existente:
+        existente.direccion = datos["direccion"]
+        existente.categoria = datos["categoria"]
+        existente.latitud = datos["latitud"]
+        existente.longitud = datos["longitud"]
+    else:
+        db.add(Restaurante(**datos))
 
 db.commit()
 
