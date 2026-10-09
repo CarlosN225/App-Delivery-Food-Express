@@ -24,7 +24,7 @@ class Pedido {
       restauranteId: json['restaurante_id'],
       restaurante: json['restaurante'],
       estado: json['estado'],
-      total: (json['total'] as num).toDouble(),
+      total: double.tryParse(json['total'].toString()) ?? 0.0,
       fechaCreacion: json['fecha_creacion'],
     );
   }

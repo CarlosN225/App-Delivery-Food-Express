@@ -29,6 +29,7 @@ class Restaurante {
     );
   }
 }
+
 class Producto {
   final int id;
   final int restauranteId;
@@ -54,7 +55,7 @@ class Producto {
       restauranteId: json['restaurante_id'],
       nombre: json['nombre'],
       descripcion: json['descripcion'],
-      precio: (json['precio'] as num).toDouble(),
+      precio: double.tryParse(json['precio'].toString()) ?? 0.0,
       categoria: json['categoria'],
       imagen: json['imagen'],
     );
