@@ -2,10 +2,11 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../core/api_client.dart';
 import 'restaurant_model.dart';
 
 class RestauranteService {
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const String baseUrl = ApiConfig.baseUrl;
 
   static Future<List<Restaurante>> obtenerRestaurantesCercanos({
     required double latitud,

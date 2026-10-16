@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../core/location_service.dart';
 import '../../core/theme.dart';
 import '../auth/auth_service.dart';
+import '../cart/carrito_screen.dart';
+import '../cart/carrito_service.dart';
+import '../cart/mis_pedidos_screen.dart';
 import '../auth/login_screen.dart';
 import '../restaurants/restaurant_model.dart';
 import '../restaurants/restaurant_service.dart';
@@ -88,6 +91,41 @@ print('LONGITUD: ${posicion?.longitude}');
           style: AppTypography.barTitle(),
         ),
         actions: [
+          if (widget.usuario.rol == 'cliente') ...[
+            ListenableBuilder(
+              listenable: CarritoService.instance,
+              builder: (context, _) => IconButton(
+                tooltip: 'Mi carrito',
+                icon: Badge(
+                  isLabelVisible: !CarritoService.instance.vacio,
+                  label: Text('${CarritoService.instance.totalPiezas}'),
+                  child: const Icon(Icons.shopping_cart_outlined),
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          CarritoScreen(usuario: widget.usuario),
+                    ),
+                  );
+                },
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.receipt_long_outlined),
+              tooltip: 'Mis pedidos',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        MisPedidosScreen(usuario: widget.usuario),
+                  ),
+                );
+              },
+            ),
+          ],
           if (widget.usuario.rol == 'repartidor')
   IconButton(
     icon: const Icon(Icons.delivery_dining),
@@ -112,6 +150,7 @@ print('LONGITUD: ${posicion?.longitude}');
             icon: const Icon(Icons.logout),
             tooltip: 'Cerrar sesión',
             onPressed: () {
+              CarritoService.instance.vaciar();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(
                   builder: (_) => const LoginScreen(),
@@ -214,6 +253,7 @@ print('LONGITUD: ${posicion?.longitude}');
         MaterialPageRoute(
           builder: (context) => MenuScreen(
             restaurante: restaurante,
+            usuario: widget.usuario,
           ),
         ),
       );

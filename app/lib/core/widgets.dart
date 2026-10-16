@@ -284,3 +284,94 @@ class _Option extends StatelessWidget {
     );
   }
 }
+
+/// Barra superior verde estándar para las pantallas internas.
+AppBar buildAppBar(
+  String title, {
+  List<Widget>? actions,
+  PreferredSizeWidget? bottom,
+}) {
+  return AppBar(
+    backgroundColor: AppColors.primary,
+    foregroundColor: Colors.white,
+    title: Text(title, style: AppTypography.barTitle().copyWith(fontSize: 20)),
+    actions: actions,
+    bottom: bottom,
+  );
+}
+
+/// Tarjeta blanca con borde, como en los wireframes.
+class AppCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry margin;
+  final Color? borderColor;
+
+  const AppCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.margin = const EdgeInsets.only(bottom: 12),
+    this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: margin,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor ?? AppColors.border, width: 1.5),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Botón secundario con borde verde.
+class OutlineActionButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final IconData? icon;
+
+  const OutlineActionButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final texto = Text(
+      label,
+      textAlign: TextAlign.center,
+      style: AppTypography.body(color: AppColors.primary, weight: FontWeight.w600),
+    );
+    return SizedBox(
+      height: 46,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.white,
+          side: const BorderSide(color: AppColors.primary, width: 1.5),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        child: icon == null
+            ? texto
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Flexible(child: texto),
+                ],
+              ),
+      ),
+    );
+  }
+}

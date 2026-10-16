@@ -1,70 +1,98 @@
-# Food Express — Backend (Sprint 1)
+# Food Express — Backend
 
-API construida con FastAPI. Cubre las historias del Sprint 1:
+API construida con FastAPI.
 
-- **#1 Arquitectura backend y modelo de datos** — modelos de `Usuario`, `Restaurante` y `Pedido` con sus relaciones, listos para MySQL.
-- **#2 Registro y autenticación de clientes y repartidores** — registro, login con JWT y una ruta protegida de prueba.
-
-Ya probado de punta a punta (registro, login, token, ruta protegida, y validación de errores).
+| Sprint | Historias |
+|---|---|
+| 1 | #1 Arquitectura y modelo de datos · #2 Registro y autenticación (JWT) |
+| 2 | Restaurantes cercanos, menú de productos, panel del repartidor |
+| 3 | **#9** Carrito y pedido · **#10** Pasarela de pagos · **#11** Ruta óptima básica · **#12** Estado de entrega |
 
 ## Cómo correrlo
-
-1. Crear el entorno virtual e instalar dependencias:
 
 ```bash
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-```
-
-2. Copiar `.env.example` a `.env` y llenar tus datos reales de MySQL:
-
-```bash
 cp .env.example .env
-```
-
-3. Levantar el servidor:
-
-```bash
 venv/bin/python -m uvicorn app.main:app --reload
 ```
 
-4. Abrir en el navegador: **http://127.0.0.1:8000/docs**
+Documentación interactiva (Swagger): **http://127.0.0.1:8000/docs**
 
-Ahí aparece la documentación interactiva (Swagger). Se puede probar `/auth/registro` y `/auth/login` directo desde ahí, sin necesidad de Postman — útil para la demo del Sprint Review.
+Para probar sin MySQL, en el `.env` usa `DATABASE_URL=sqlite:///./food_express.db`. Las tablas se crean solas al arrancar y, si ya tenías una base de datos de Sprints anteriores, se le agregan sola las columnas nuevas de `pedidos` (`app/migraciones.py`); tus pedidos viejos se tratan como «efectivo, pago contra entrega».
 
-## Probar rápido sin MySQL instalado
+Datos de ejemplo: `python -m app.insertar_restaurantes`, `python -m app.insertar_productos` y, para tener un pedido que el repartidor pueda tomar sin usar la app del cliente, `python -m app.insertar_pedido_prueba`.
 
-Si todavía no tienes MySQL a la mano, cambia en tu `.env`:
+## Pruebas automáticas
+
+```bash
+venv/bin/pip install -r requirements-dev.txt
+venv/bin/pytest
+```
+
+Cubren el flujo completo: cotizar → crear pedido → pago (modo demo) → disponibles → aceptar/rechazar → Recogido/En camino/Entregado → ruta óptima, además de permisos y validaciones.
+
+## Flujo del Sprint 3
 
 ```
-DATABASE_URL=sqlite:///./food_express.db
+Cliente                         Backend                          Repartidor
+  │ POST /pedidos/cotizar  ───►  subtotal + envío + total
+  │ POST /pedidos          ───►  crea pedido (pendiente)
+  │   efectivo: listo  ·  Mercado Pago: POST /pagos/pedido/{id}/preferencia
+  │   → paga en Mercado Pago → POST /pagos/pedido/{id}/verificar (estado_pago = pagado)
+  │                                                        GET /pedidos/disponibles ◄─
+  │                                                        PUT /pedidos/{id}/aceptar ◄─  (aceptado)
+  │                                                        PUT /pedidos/{id}/estado  ◄─  recogido → en_camino → entregado
+  │ GET /pedidos/mis-pedidos ◄── ve el estado en vivo      GET /pedidos/ruta-optima  ◄─
 ```
 
-Y todo funciona igual (las tablas se crean solas al arrancar el servidor). Cuando tengan MySQL listo, solo se cambia esa línea — el resto del código no cambia.
+Un pedido con Mercado Pago **no aparece para los repartidores hasta que está pagado**. Los precios y el total siempre los calcula el backend (la app solo manda producto y cantidad). Un pedido en efectivo queda como cobrado cuando el repartidor lo marca como entregado.
 
-## Endpoints disponibles
+## Endpoints
 
-| Método | Ruta            | Descripción                                      |
-|--------|-----------------|---------------------------------------------------|
-| POST   | `/auth/registro`| Crea un usuario (cliente, repartidor o admin)     |
-| POST   | `/auth/login`   | Devuelve un token JWT (usar como `username`/`password`) |
-| GET    | `/auth/me`      | Ruta protegida: devuelve el usuario del token      |
-| GET    | `/`             | Estado del servicio                               |
+Todos (salvo `/auth/registro`, `/auth/login`, restaurantes y productos) requieren `Authorization: Bearer <token>`.
+
+| Método | Ruta | Rol | Descripción |
+|---|---|---|---|
+| POST | `/auth/registro`, `/auth/login` | — | Alta y login (JWT) |
+| GET | `/auth/me` | cualquiera | Usuario del token |
+| GET | `/restaurantes/cercanos` | — | Restaurantes por distancia |
+| GET | `/productos/restaurante/{id}` | — | Menú |
+| POST | `/pedidos/cotizar` | cliente | Subtotal, envío y total del carrito |
+| POST | `/pedidos` | cliente | Genera el pedido (`metodo_pago`: `efectivo` o `mercado_pago`) |
+| GET | `/pedidos/mis-pedidos` | cliente | Pedidos del cliente con su estado |
+| POST | `/pedidos/{id}/cancelar` | cliente | Solo si sigue pendiente y sin pagar |
+| GET | `/pedidos/{id}` | dueño / repartidor asignado / admin | Detalle |
+| POST | `/pagos/pedido/{id}/preferencia` | cliente | Enlace de pago de Mercado Pago (`init_point`) |
+| POST | `/pagos/pedido/{id}/verificar` | cliente | Confirma el pago consultando a Mercado Pago |
+| POST | `/pagos/webhook` | Mercado Pago | Notificación de pago (se valida contra la API de MP) |
+| GET | `/pedidos/disponibles` | repartidor | Pedidos pagados/efectivo sin repartidor (`?latitud=&longitud=` para distancias) |
+| PUT | `/pedidos/{id}/aceptar` | repartidor | Toma el pedido (si dos aceptan a la vez, solo uno gana) |
+| PUT | `/pedidos/{id}/rechazar` | repartidor | Lo oculta solo para ese repartidor |
+| GET | `/pedidos/activos` | repartidor | Pedidos aceptados sin entregar |
+| PUT | `/pedidos/{id}/estado` | repartidor | Avanza: `recogido` → `en_camino` → `entregado` |
+| GET | `/pedidos/ruta-optima` | repartidor | Orden sugerido de todas sus paradas, con km y minutos |
+| GET | `/pedidos/{id}/ruta` | repartidor | Ruta restante de un pedido según su estado |
+
+## Pagos con Mercado Pago
+
+- **Modo demo (por defecto):** si `MERCADO_PAGO_ACCESS_TOKEN` está vacío, `init_point` abre una página del propio backend con «Aprobar pago» / «Rechazar pago». Sirve para toda la demo del Sprint Review sin cuenta de Mercado Pago.
+- **Modo real:** pon el Access Token de prueba o producción en el `.env`. El backend crea la preferencia (Checkout Pro) y confirma cada pago consultando la API de Mercado Pago, comprobando que corresponda al pedido y al monto. Para webhook y regreso automático necesita una URL pública `https` en `PUBLIC_BASE_URL` (por ejemplo ngrok).
+- Desde un celular real, el enlace de pago usa la misma dirección con la que la app llama al backend, así que `ApiConfig.baseUrl` debe ser la IP de tu computadora, no `127.0.0.1`.
+
+## Ruta óptima básica (#11)
+
+`app/services/logistica.py` (Python puro, con pruebas propias): distancias Haversine, costo de envío (`$20 + $4/km`, mínimo `$30`), tiempo estimado (25 km/h) y orden de paradas por *vecino más cercano*, respetando que un pedido se recoge antes de entregarse. En el Sprint 5 se puede sustituir por Google Directions sin cambiar la interfaz.
 
 ## Estructura
 
 ```
 app/
-├── main.py            # arranque de la app y creación de tablas
-├── database.py         # conexión a MySQL/SQLite vía SQLAlchemy
-├── models/              # Usuario, Restaurante, Pedido
-├── schemas/            # validación de datos (Pydantic)
-├── routers/auth.py      # registro, login, ruta protegida
-└── services/security.py # hash de contraseñas y manejo de JWT
+├── main.py              # arranque, tablas y migraciones
+├── migraciones.py       # columnas nuevas para bases de datos viejas
+├── models/              # Usuario, Restaurante, Producto, Pedido, ItemPedido, PedidoRechazado
+├── schemas/             # validación (Pydantic)
+├── routers/             # auth, restaurantes, productos, pedidos, pagos
+└── services/            # security (JWT), logistica (rutas/envío), mercadopago
+tests/                   # pytest
 ```
-
-## Siguientes Sprints (ya contemplado en la arquitectura)
-
-- Sprint 2: endpoints de restaurantes y menú (tabla `Restaurante` ya existe).
-- Sprint 3: carrito/pedido y pagos con Mercado Pago (tabla `Pedido` ya existe).
-- Sprint 5: integración de Google Maps para rutas.

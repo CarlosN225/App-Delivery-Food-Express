@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, RolUsuario
 from app.schemas.usuario import UsuarioCreate, UsuarioOut, Token
 from app.services.security import (
     hash_contrasena,
@@ -91,3 +91,21 @@ def leer_usuario_actual(usuario_actual: Usuario = Depends(obtener_usuario_actual
     significa que el registro, el login y el token JWT funcionan de punta a punta.
     """
     return usuario_actual
+
+
+
+def requerir_rol(*roles: RolUsuario):
+    """
+    Dependencia de FastAPI: exige sesión válida y que el usuario tenga uno de
+    los roles indicados. Ejemplo: `Depends(requerir_rol(RolUsuario.cliente))`.
+    """
+
+    def verificar(usuario: Usuario = Depends(obtener_usuario_actual)) -> Usuario:
+        if usuario.rol not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permiso para esta acción.",
+            )
+        return usuario
+
+    return verificar
