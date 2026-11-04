@@ -829,28 +829,17 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+      // Solo el monito de perfil (el tooltip dice «Mi cuenta»).
       child: const Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 12,
+        padding: EdgeInsets.only(
+          left: 10,
+          top: 12,
+          bottom: 12,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.person_outline,
-              size: 27,
-              color: verdeOscuro,
-            ),
-            SizedBox(width: 8),
-            Text(
-              'Mi cuenta',
-              style: TextStyle(
-                color: verdeOscuro,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        child: Icon(
+          Icons.person_outline,
+          size: 29,
+          color: verdeOscuro,
         ),
       ),
     );
@@ -1000,6 +989,40 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // El PNG del logo trae mucho margen transparente (arriba, abajo y a los
+  // lados), por eso se veía chico y despegado de la orilla. Aquí se recorta
+  // a la parte visible para que quede pegado a la izquierda.
+  Widget _logo(double ancho) {
+    const anchoPng = 1672.0;
+    const altoPng = 941.0;
+    const margenIzq = 123.0;
+    const margenSup = 200.0;
+    const anchoVisible = 1471.0;
+    const altoVisible = 524.0;
+
+    final escala = ancho / anchoVisible;
+
+    return SizedBox(
+      width: ancho,
+      height: altoVisible * escala,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          Positioned(
+            left: -margenIzq * escala,
+            top: -margenSup * escala,
+            width: anchoPng * escala,
+            height: altoPng * escala,
+            child: Image.asset(
+              'assets/images/logo-food-express.png',
+              fit: BoxFit.fill,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _header(bool compacto) {
     if (compacto) {
       return Container(
@@ -1010,19 +1033,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         padding: const EdgeInsets.symmetric(
-          horizontal: 18,
+          horizontal: 20,
           vertical: 10,
         ),
         child: Column(
           children: [
             Row(
               children: [
-                Image.asset(
-                  'assets/images/logo-food-express.png',
-                  width: 165,
-                  height: 55,
-                  fit: BoxFit.contain,
-                ),
+                _logo(124),
                 const Spacer(),
                 if (_esCliente)
                   IconButton(
@@ -1076,12 +1094,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 215,
-            height: 75,
-            fit: BoxFit.contain,
-          ),
+          _logo(160),
           const SizedBox(width: 40),
           _ubicacion(),
           const SizedBox(width: 40),
@@ -1132,12 +1145,27 @@ class _HomeScreenState extends State<HomeScreen> {
         fit: StackFit.expand,
         children: [
           // IMAGEN: solamente el fondo ilustrado (sin texto).
-          // Su lado izquierdo ya es oscuro, por eso
-          // no hace falta ningún degradado encima.
           Image.asset(
             'assets/images/banner-promo.png',
             fit: BoxFit.cover,
             alignment: Alignment.centerRight,
+          ),
+
+          // VELO OSCURO: atenúa la ilustración detrás del texto para que
+          // se lea bien; se aclara hacia la derecha para ver el dibujo.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: const [
+                  Color(0xE6043C3C),
+                  Color(0xB8043C3C),
+                  Color(0x40043C3C),
+                ],
+                stops: [0, compacto ? 0.8 : 0.55, 1],
+              ),
+            ),
           ),
 
           // TEXTO Y BOTÓN HECHOS CON FLUTTER.
@@ -1181,6 +1209,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         fontWeight: FontWeight.w900,
                         height: 1.05,
                         letterSpacing: -1,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x66000000),
+                            blurRadius: 8,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -1189,6 +1223,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: compacto ? 16 : 22,
+                        fontWeight: FontWeight.w500,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x66000000),
+                            blurRadius: 6,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1512,7 +1553,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // BARRA DE CATEGORÍAS
   // =====================================================
 
-  Widget _categoria(String nombre) {
+  Widget _categoria(String nombre, {bool compacta = false}) {
     final seleccionado = categoriaSeleccionada == nombre;
 
     return InkWell(
@@ -1522,10 +1563,15 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       },
       child: Container(
-        width: 150,
-        padding: const EdgeInsets.only(
+        // Celular: ancho mínimo parejo y se ajusta al texto.
+        // Pantalla grande: 150 fijo, repartido en toda la barra.
+        width: compacta ? null : 150,
+        constraints: compacta ? const BoxConstraints(minWidth: 86) : null,
+        padding: EdgeInsets.only(
           top: 15,
           bottom: 8,
+          left: compacta ? 12 : 0,
+          right: compacta ? 12 : 0,
         ),
         decoration: BoxDecoration(
           border: Border(
@@ -1540,14 +1586,16 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(
               _iconoCategoria(nombre),
-              size: 35,
+              size: compacta ? 30 : 35,
               color: seleccionado ? turquesa : verdeOscuro,
             ),
             const SizedBox(height: 5),
             Text(
               nombre,
+              maxLines: 1,
+              softWrap: false,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: compacta ? 14 : 16,
                 color: seleccionado ? turquesa : grisTexto,
                 fontWeight: seleccionado
                     ? FontWeight.w800
@@ -1576,18 +1624,23 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final compacta = constraints.maxWidth < 700;
+
           return SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.symmetric(horizontal: compacta ? 8 : 0),
             child: ConstrainedBox(
               // Ocupa al menos todo el ancho de la pantalla
               // para que spaceAround reparta las categorías.
               constraints: BoxConstraints(
-                minWidth: constraints.maxWidth,
+                minWidth: constraints.maxWidth - (compacta ? 16 : 0),
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                mainAxisAlignment: compacta
+                    ? MainAxisAlignment.start
+                    : MainAxisAlignment.spaceAround,
                 children: _categoriasDisponibles
-                    .map(_categoria)
+                    .map((n) => _categoria(n, compacta: compacta))
                     .toList(),
               ),
             ),

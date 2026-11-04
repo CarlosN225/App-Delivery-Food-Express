@@ -95,6 +95,12 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   Timer? _gps;
   bool _reportando = false;
 
+  // ---- hoja inferior (solo en pantallas angostas / celular)
+  final DraggableScrollableController _hoja = DraggableScrollableController();
+  bool _movil = false;
+  double _hojaInicial = 0.4;
+  double _hojaMax = 0.92;
+
   // ---- mapa
   GoogleMapController? _mapa;
 
@@ -123,6 +129,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   void dispose() {
     _gps?.cancel();
     _mapa?.dispose();
+    _hoja.dispose();
     super.dispose();
   }
 
@@ -284,12 +291,60 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   void _cambiarTab(int nueva) {
     setState(() => _tab = nueva);
+    _colapsarHoja();
     _ajustarCamaraConEspera();
   }
 
   void _seleccionar(int pedidoId) {
     setState(() => _sel = pedidoId);
+    _colapsarHoja();
     _ajustarCamara();
+  }
+
+  // ----------------------------------------------------- hoja inferior (móvil)
+
+  /// Baja la hoja para que el mapa quede grande y a la vista.
+  void _colapsarHoja() {
+    if (!_movil || !_hoja.isAttached) return;
+    _hoja.animateTo(
+      _hojaInicial,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _alternarHoja() {
+    if (!_hoja.isAttached) return;
+    final arriba = _hoja.size > (_hojaInicial + _hojaMax) / 2;
+    _hoja.animateTo(
+      arriba ? _hojaInicial : _hojaMax,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _arrastrarHoja(double dy, double alto) {
+    if (!_hoja.isAttached || alto <= 0) return;
+    final nuevo = (_hoja.size - dy / alto).clamp(_hojaInicial, _hojaMax);
+    _hoja.jumpTo(nuevo.toDouble());
+  }
+
+  void _soltarHoja(double velocidad) {
+    if (!_hoja.isAttached) return;
+    final mitad = (_hojaInicial + _hojaMax) / 2;
+    final double destino;
+    if (velocidad < -300) {
+      destino = _hojaMax;
+    } else if (velocidad > 300) {
+      destino = _hojaInicial;
+    } else {
+      destino = _hoja.size >= mitad ? _hojaMax : _hojaInicial;
+    }
+    _hoja.animateTo(
+      destino,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
   }
 
   /// Pedido disponible resaltado (solo en la pestaña Disponibles).
@@ -683,7 +738,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             southwest: LatLng(minLat, minLon),
             northeast: LatLng(maxLat, maxLon),
           ),
-          90,
+          _movil ? 56 : 90,
         ),
       );
     } catch (e) {
@@ -699,6 +754,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   @override
   Widget build(BuildContext context) {
     final ancha = _esAncha(context);
+    _movil = !ancha;
     final arriba = MediaQuery.of(context).padding.top;
     return Scaffold(
       backgroundColor: _papel,
@@ -720,25 +776,217 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 Expanded(child: _mapaCompleto()),
               ],
             )
-          : LayoutBuilder(
-              builder: (context, c) {
-                final altoMapa = (c.maxHeight * 0.42).clamp(250.0, 440.0);
-                return Column(
-                  children: [
-                    SizedBox(
-                      height: altoMapa.toDouble(),
-                      child: _mapaCompleto(),
-                    ),
-                    Expanded(
-                      child: Container(
-                        color: Colors.white,
-                        child: _panel(ancha),
-                      ),
-                    ),
-                  ],
-                );
-              },
+          : _cuerpoMovil(),
+    );
+  }
+
+  // ------------------------------------------------- celular: mapa + hoja
+
+  /// Mapa casi a pantalla completa y, debajo, una hoja que se arrastra hacia
+  /// arriba para ver los pedidos.
+  Widget _cuerpoMovil() {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final alto = c.maxHeight;
+        final inicial = (330 / alto).clamp(0.3, 0.5).toDouble();
+        _hojaInicial = inicial;
+        _hojaMax = 0.94;
+        return Stack(
+          children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: alto * inicial,
+              child: _mapaCompleto(compacto: true),
             ),
+            DraggableScrollableSheet(
+              controller: _hoja,
+              initialChildSize: inicial,
+              minChildSize: inicial,
+              maxChildSize: _hojaMax,
+              snap: true,
+              builder: (context, scroll) => _hojaMovil(scroll, alto),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _hojaMovil(ScrollController scroll, double alto) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x2E000000),
+            blurRadius: 14,
+            offset: Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _alternarHoja,
+            onVerticalDragUpdate: (d) =>
+                _arrastrarHoja(d.primaryDelta ?? 0, alto),
+            onVerticalDragEnd: (d) => _soltarHoja(d.primaryVelocity ?? 0),
+            child: Column(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 8, bottom: 8),
+                  child: SizedBox(
+                    width: 44,
+                    height: 4,
+                    child: ColoredBox(color: Color(0xFFB7CBC8)),
+                  ),
+                ),
+                _encabezadoMovil(),
+              ],
+            ),
+          ),
+          _selectorTabs(repartido: true),
+          if (_tab == 1 && activos.isNotEmpty) _barraAccionMovil(),
+          Expanded(child: _contenidoMovil(scroll)),
+        ],
+      ),
+    );
+  }
+
+  Widget _encabezadoMovil() {
+    final conGps = posicion != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('CENTRO DE REPARTO', style: _rotulo(size: 9.5)),
+                const SizedBox(height: 2),
+                Text('Panel del repartidor', style: _titulo(size: 19)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(border: Border.all(color: _linea)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  color: conGps ? AppColors.mint : AppColors.error,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  conGps ? 'EN LÍNEA' : 'SIN GPS',
+                  style: _rotulo(color: _tinta, size: 9.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: cargar,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(border: Border.all(color: _tinta)),
+              child: const Icon(Icons.refresh, color: _tinta, size: 19),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Acción siguiente del pedido en curso, siempre a la vista (sin bajar).
+  Widget _barraAccionMovil() {
+    final p = _activoSel;
+    if (p == null) return const SizedBox.shrink();
+
+    const orden = ['aceptado', 'recogido', 'en_camino', 'entregado'];
+    final indice = orden.indexOf(p.estado);
+    final siguiente =
+        (indice >= 0 && indice < orden.length - 1) ? orden[indice + 1] : null;
+    const textoAccion = {
+      'recogido': 'Confirmar recogido',
+      'en_camino': 'Iniciar entrega',
+      'entregado': 'Confirmar entrega',
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: const BoxDecoration(
+        color: _papel,
+        border: Border(bottom: BorderSide(color: _linea)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'PEDIDO #${p.id} · ${p.restaurante.toUpperCase()}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _rotulo(size: 10),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _Rotulo(
+                texto: textoEstado(p.estado).toUpperCase(),
+                fondo: _tinta,
+                color: Colors.white,
+              ),
+            ],
+          ),
+          if (siguiente != null) ...[
+            const SizedBox(height: 10),
+            _Boton(
+              texto: textoAccion[siguiente] ?? 'Continuar',
+              icono: Icons.arrow_forward,
+              cargando: _ocupados.contains(p.id),
+              onPressed: () => _cambiarEstado(p, siguiente),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _contenidoMovil(ScrollController scroll) {
+    final List<Widget> hijos;
+    if (cargando) {
+      hijos = const [
+        Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ];
+    } else if (error != null) {
+      hijos = [
+        Text(error!, textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        _Boton(texto: 'Intentar nuevamente', onPressed: cargar),
+      ];
+    } else {
+      hijos = _tab == 0 ? _listaDisponibles() : _listaEnCurso();
+    }
+    return ListView(
+      controller: scroll,
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      children: hijos,
     );
   }
 
@@ -880,11 +1128,14 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             width: 40,
             height: 40,
             alignment: Alignment.center,
-            color: _tinta,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: _tinta, width: 1.6),
+            ),
             child: Text(
               inicial,
               style: AppTypography.body(
-                color: Colors.white,
+                color: _tinta,
                 weight: FontWeight.w700,
               ),
             ),
@@ -1014,27 +1265,44 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     );
   }
 
-  Widget _selectorTabs() {
+  /// [repartido]: celular, las dos pestañas ocupan todo el ancho.
+  Widget _selectorTabs({bool repartido = false}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: EdgeInsets.symmetric(horizontal: repartido ? 0 : 24),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _linea)),
+        border: Border(
+          top: BorderSide(color: _linea),
+          bottom: BorderSide(color: _linea),
+        ),
       ),
       child: Row(
-        children: [
-          _pestana(0, 'Disponibles', disponibles.length),
-          const SizedBox(width: 28),
-          _pestana(1, 'En curso', activos.length),
-        ],
+        children: repartido
+            ? [
+                Expanded(
+                  child: _pestana(0, 'Disponibles', disponibles.length,
+                      centrada: true),
+                ),
+                Expanded(
+                  child: _pestana(1, 'En curso', activos.length,
+                      centrada: true),
+                ),
+              ]
+            : [
+                _pestana(0, 'Disponibles', disponibles.length),
+                const SizedBox(width: 28),
+                _pestana(1, 'En curso', activos.length),
+              ],
       ),
     );
   }
 
-  Widget _pestana(int indice, String texto, int cuantos) {
+  Widget _pestana(int indice, String texto, int cuantos,
+      {bool centrada = false}) {
     final activa = _tab == indice;
     return InkWell(
       onTap: () => _cambiarTab(indice),
       child: Container(
+        alignment: centrada ? Alignment.center : null,
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           border: Border(
@@ -1396,14 +1664,16 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           Text('AVANCE DE LA ENTREGA', style: _rotulo()),
           const SizedBox(height: 10),
           _ProgresoEntrega(estado: p.estado),
-          const SizedBox(height: 18),
-          if (siguiente != null)
+          // En el celular el botón de la acción siguiente va fijo arriba.
+          if (siguiente != null && !(_movil && _activoSel?.id == p.id)) ...[
+            const SizedBox(height: 18),
             _Boton(
               texto: textoAccion[siguiente] ?? 'Continuar',
               icono: Icons.arrow_forward,
               cargando: ocupado,
               onPressed: () => _cambiarEstado(p, siguiente),
             ),
+          ],
         ],
       ),
     );
@@ -1411,7 +1681,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   // ------------------------------------------------------------ mapa grande
 
-  Widget _mapaCompleto() {
+  Widget _mapaCompleto({bool compacto = false}) {
     final enCurso = _tab == 1;
     final activo = _activoSel;
     final elegido = _disponibleSel;
@@ -1488,7 +1758,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             style: _estiloMapa,
             markers: _marcadores(),
             polylines: _trazos(),
-            zoomControlsEnabled: true,
+            zoomControlsEnabled: !compacto,
             mapToolbarEnabled: false,
             myLocationButtonEnabled: false,
             onMapCreated: (controlador) {
@@ -1498,14 +1768,14 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           ),
         ),
         Positioned(
-          left: 16,
-          top: 16,
-          right: 150,
+          left: compacto ? 10 : 16,
+          top: compacto ? 10 : 16,
+          right: compacto ? 62 : 150,
           child: Align(
             alignment: Alignment.topLeft,
             child: Container(
               constraints: const BoxConstraints(maxWidth: 320),
-              padding: const EdgeInsets.fromLTRB(14, 10, 16, 10),
+              padding: EdgeInsets.fromLTRB(14, compacto ? 8 : 10, 16, compacto ? 8 : 10),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 border: Border(
@@ -1525,7 +1795,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                     textoTarjeta,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: _titulo(size: 17),
+                    style: _titulo(size: compacto ? 15 : 17),
                   ),
                   if (detalleTarjeta != null)
                     Text(
@@ -1535,14 +1805,19 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                         size: 12,
                       ),
                     ),
+                  if (compacto && enCurso && activo != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(pie, style: _rotulo(size: 8.5)),
+                    ),
                 ],
               ),
             ),
           ),
         ),
         Positioned(
-          right: 16,
-          top: 16,
+          right: compacto ? 10 : 16,
+          top: compacto ? 10 : 16,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -1565,12 +1840,17 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              _leyenda(),
+              if (!compacto) ...[
+                const SizedBox(height: 10),
+                _leyenda(),
+              ],
             ],
           ),
         ),
-        Positioned(
+        if (compacto)
+          Positioned(left: 10, bottom: 34, child: _leyendaCompacta()),
+        if (!compacto)
+          Positioned(
           left: 16,
           bottom: 36,
           child: ConstrainedBox(
@@ -1603,6 +1883,38 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Leyenda en una sola fila para el celular.
+  Widget _leyendaCompacta() {
+    Widget punto(Color color, String texto) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 9, height: 9, color: color),
+          const SizedBox(width: 5),
+          Text(texto, style: AppTypography.body(size: 10.5)),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: _linea),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          punto(_naranja, 'Restaurante'),
+          const SizedBox(width: 10),
+          punto(_rojo, 'Entrega'),
+          const SizedBox(width: 10),
+          punto(_azul, 'Tú'),
+        ],
+      ),
     );
   }
 
