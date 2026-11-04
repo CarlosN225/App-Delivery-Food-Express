@@ -52,6 +52,10 @@ CENTAVO = Decimal("0.01")
 # Estados en los que un pedido ya tiene repartidor y sigue en curso.
 ESTADOS_ACTIVOS = (EstadoPedido.aceptado, EstadoPedido.recogido, EstadoPedido.en_camino)
 
+# Un repartidor atiende un pedido a la vez: primero lo entrega y luego toma otro.
+# (Subir este número permite llevar varios a la vez y usar la ruta óptima #11.)
+MAX_PEDIDOS_EN_CURSO = 1
+
 # Transiciones permitidas para el repartidor (historia #12).
 TRANSICIONES = {
     EstadoPedido.aceptado: EstadoPedido.recogido,
@@ -344,6 +348,10 @@ def pedidos_disponibles(
                 "distancia_km": dist_rest,
                 "distancia_entrega_km": dist_entrega,
                 "minutos_estimados": minutos,
+                "restaurante_latitud": rc[0] if rc else None,
+                "restaurante_longitud": rc[1] if rc else None,
+                "latitud_entrega": ec[0] if ec else None,
+                "longitud_entrega": ec[1] if ec else None,
                 "fecha_creacion": p.fecha_creacion,
             }
         )
@@ -381,6 +389,20 @@ def aceptar_pedido(
     if pedido.estado_pago not in PAGOS_LISTOS and pedido.estado_pago is not None:
         raise HTTPException(
             status_code=400, detail="Este pedido todavía no está pagado."
+        )
+
+    en_curso = (
+        db.query(Pedido)
+        .filter(
+            Pedido.repartidor_id == repartidor.id,
+            Pedido.estado.in_(ESTADOS_ACTIVOS),
+        )
+        .count()
+    )
+    if en_curso >= MAX_PEDIDOS_EN_CURSO:
+        raise HTTPException(
+            status_code=409,
+            detail="Ya tienes un pedido en curso. Entrégalo antes de aceptar otro.",
         )
 
     # UPDATE condicionado: si dos repartidores aceptan a la vez, solo uno gana.

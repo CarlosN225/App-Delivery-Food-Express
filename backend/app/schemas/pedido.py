@@ -76,6 +76,11 @@ class PedidoDisponibleOut(BaseModel):
     # Distancia restaurante -> cliente.
     distancia_entrega_km: Optional[float] = None
     minutos_estimados: Optional[int] = None
+    # Coordenadas para dibujar el pedido en el mapa del repartidor.
+    restaurante_latitud: Optional[float] = None
+    restaurante_longitud: Optional[float] = None
+    latitud_entrega: Optional[float] = None
+    longitud_entrega: Optional[float] = None
     fecha_creacion: Optional[datetime] = None
 
 

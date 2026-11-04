@@ -1,8 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/api_client.dart';
 import '../../core/theme.dart';
@@ -10,9 +9,11 @@ import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
+import '../maps/mapas_service.dart';
 
 /// Rastreo del pedido en tiempo real para el cliente (Sprint 4, historia #14).
-/// Consulta el seguimiento cada 5 segundos y dibuja al repartidor en el mapa.
+/// Consulta el seguimiento cada 5 segundos y dibuja al repartidor en un mapa
+/// de Google Maps, con la ruta por calles que calcula el backend (Routes API).
 class RastreoScreen extends StatefulWidget {
   final UsuarioAutenticado usuario;
   final int pedidoId;
@@ -28,7 +29,9 @@ class RastreoScreen extends StatefulWidget {
 }
 
 class _RastreoScreenState extends State<RastreoScreen> {
-  final MapController _mapa = MapController();
+  GoogleMapController? _mapa;
+  RutaMapa? _ruta;
+  String? _estadoRuta;
   Seguimiento? seguimiento;
   String? error;
   bool cargando = true;
@@ -47,6 +50,7 @@ class _RastreoScreenState extends State<RastreoScreen> {
   @override
   void dispose() {
     _temporizador?.cancel();
+    _mapa?.dispose();
     super.dispose();
   }
 
@@ -65,10 +69,34 @@ class _RastreoScreenState extends State<RastreoScreen> {
       if (s.estado == 'entregado' || s.estado == 'cancelado') {
         _temporizador?.cancel();
       }
+      // La ruta por calles se pide una sola vez por estado (ahorra cuota).
+      if (s.estado != _estadoRuta) {
+        _estadoRuta = s.estado;
+        _cargarRuta(s.estado);
+      }
     } on ApiException catch (e) {
       _falla(e.mensaje);
     } catch (_) {
       _falla('No se pudo cargar el seguimiento.');
+    }
+  }
+
+  Future<void> _cargarRuta(String estado) async {
+    if (estado == 'entregado' || estado == 'cancelado') {
+      if (mounted) setState(() => _ruta = null);
+      return;
+    }
+    try {
+      final ruta = await MapasService.rutaDePedido(
+        widget.usuario.token,
+        widget.pedidoId,
+      );
+      if (!mounted) return;
+      setState(() => _ruta = ruta);
+      _ajustarCamara();
+    } catch (_) {
+      // Sin ruta por calles: el mapa dibuja una línea recta de respaldo.
+      debugPrint('No se pudo obtener la ruta por calles.');
     }
   }
 
@@ -132,82 +160,135 @@ class _RastreoScreenState extends State<RastreoScreen> {
   LatLng? _punto(double? lat, double? lon) =>
       (lat == null || lon == null) ? null : LatLng(lat, lon);
 
+  Marker _marcador(String id, LatLng posicion, String titulo, double tono) {
+    return Marker(
+      markerId: MarkerId(id),
+      position: posicion,
+      infoWindow: InfoWindow(title: titulo),
+      icon: BitmapDescriptor.defaultMarkerWithHue(tono),
+    );
+  }
+
+  /// Puntos que deben verse en el mapa (marcadores y ruta).
+  List<LatLng> _puntosVisibles(Seguimiento s) {
+    final restaurante = _punto(s.restauranteLatitud, s.restauranteLongitud);
+    final cliente = _punto(s.clienteLatitud, s.clienteLongitud);
+    final repartidor = _punto(s.repartidorLatitud, s.repartidorLongitud);
+    final antesDeRecoger = s.estado == 'pendiente' || s.estado == 'aceptado';
+
+    return <LatLng>[
+      if (antesDeRecoger && restaurante != null) restaurante,
+      if (cliente != null) cliente,
+      if (repartidor != null) repartidor,
+      ...?_ruta?.puntos,
+    ];
+  }
+
+  /// Acerca la cámara para que se vea todo el recorrido.
+  Future<void> _ajustarCamara() async {
+    final controlador = _mapa;
+    final s = seguimiento;
+    if (controlador == null || s == null) return;
+
+    final puntos = _puntosVisibles(s);
+    if (puntos.isEmpty) return;
+
+    var minLat = puntos.first.latitude;
+    var maxLat = minLat;
+    var minLon = puntos.first.longitude;
+    var maxLon = minLon;
+    for (final p in puntos) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLon) minLon = p.longitude;
+      if (p.longitude > maxLon) maxLon = p.longitude;
+    }
+
+    try {
+      if (minLat == maxLat && minLon == maxLon) {
+        await controlador.animateCamera(
+          CameraUpdate.newLatLngZoom(puntos.first, 16),
+        );
+        return;
+      }
+      await controlador.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(minLat, minLon),
+            northeast: LatLng(maxLat, maxLon),
+          ),
+          56,
+        ),
+      );
+    } catch (e) {
+      debugPrint('No se pudo ajustar la cámara: $e');
+    }
+  }
+
   Widget _mapaWidget(Seguimiento s) {
     final restaurante = _punto(s.restauranteLatitud, s.restauranteLongitud);
     final cliente = _punto(s.clienteLatitud, s.clienteLongitud);
     final repartidor = _punto(s.repartidorLatitud, s.repartidorLongitud);
     final antesDeRecoger = s.estado == 'pendiente' || s.estado == 'aceptado';
 
-    // Puntos que deben verse en el mapa.
-    final puntos = <LatLng>[
-      if (antesDeRecoger && restaurante != null) restaurante,
-      if (cliente != null) cliente,
-      if (repartidor != null) repartidor,
-    ];
+    // Trazo: la ruta por calles de Google; si no hay, una línea recta
+    // repartidor -> (restaurante) -> cliente.
+    final trazo = (_ruta != null && _ruta!.puntos.length >= 2)
+        ? _ruta!.puntos
+        : <LatLng>[
+            if (repartidor != null) repartidor,
+            if (antesDeRecoger && restaurante != null) restaurante,
+            if (cliente != null) cliente,
+          ];
 
-    // Recorrido restante: repartidor -> (restaurante) -> cliente.
-    final linea = <LatLng>[
-      if (repartidor != null) repartidor,
-      if (antesDeRecoger && restaurante != null && repartidor != null)
-        restaurante,
-      if (cliente != null) cliente,
-    ];
+    final marcadores = <Marker>{
+      if (antesDeRecoger && restaurante != null)
+        _marcador(
+          'restaurante',
+          restaurante,
+          'Restaurante: ${s.restaurante}',
+          BitmapDescriptor.hueAzure,
+        ),
+      if (cliente != null)
+        _marcador('cliente', cliente, 'Tú', BitmapDescriptor.hueRed),
+      if (repartidor != null)
+        _marcador(
+          'repartidor',
+          repartidor,
+          s.repartidorNombre ?? 'Repartidor',
+          BitmapDescriptor.hueGreen,
+        ),
+    };
+
+    final centro = _puntosVisibles(s).isNotEmpty
+        ? _puntosVisibles(s).first
+        : const LatLng(19.60, -99.31);
 
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _mapa,
-          options: MapOptions(
-            initialCenter:
-                puntos.isNotEmpty ? puntos.first : const LatLng(19.60, -99.31),
-            initialZoom: 15,
-            initialCameraFit: puntos.length >= 2
-                ? CameraFit.bounds(
-                    bounds: LatLngBounds.fromPoints(puntos),
-                    padding: const EdgeInsets.all(56),
-                    maxZoom: 17,
-                  )
-                : null,
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.example.food_express',
-            ),
-            if (linea.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: linea,
-                    strokeWidth: 4,
-                    color: AppColors.primary,
-                  ),
-                ],
+        GoogleMap(
+          initialCameraPosition: CameraPosition(target: centro, zoom: 15),
+          markers: marcadores,
+          polylines: {
+            if (trazo.length >= 2)
+              Polyline(
+                polylineId: const PolylineId('ruta'),
+                points: trazo,
+                width: 5,
+                color: AppColors.primary,
               ),
-            MarkerLayer(
-              markers: [
-                if (antesDeRecoger && restaurante != null)
-                  _marcador(
-                    restaurante,
-                    Icons.store,
-                    'Restaurante',
-                    AppColors.primaryDark,
-                  ),
-                if (cliente != null)
-                  _marcador(cliente, Icons.location_on, 'Tú', AppColors.error),
-                if (repartidor != null)
-                  _marcador(
-                    repartidor,
-                    Icons.delivery_dining,
-                    'Repartidor',
-                    AppColors.primary,
-                  ),
-              ],
-            ),
-            const SimpleAttributionWidget(
-              source: Text('© OpenStreetMap contributors'),
-            ),
-          ],
+          },
+          zoomControlsEnabled: true,
+          mapToolbarEnabled: false,
+          myLocationButtonEnabled: false,
+          onMapCreated: (controlador) {
+            _mapa = controlador;
+            // Pequeña espera para que el mapa termine de dibujarse.
+            Future.delayed(
+              const Duration(milliseconds: 400),
+              _ajustarCamara,
+            );
+          },
         ),
         Positioned(
           right: 10,
@@ -216,54 +297,11 @@ class _RastreoScreenState extends State<RastreoScreen> {
             heroTag: 'recentrar',
             backgroundColor: Colors.white,
             foregroundColor: AppColors.primary,
-            onPressed: () => _recentrar(puntos),
+            onPressed: _ajustarCamara,
             child: const Icon(Icons.my_location),
           ),
         ),
       ],
-    );
-  }
-
-  void _recentrar(List<LatLng> puntos) {
-    if (puntos.length >= 2) {
-      _mapa.fitCamera(
-        CameraFit.bounds(
-          bounds: LatLngBounds.fromPoints(puntos),
-          padding: const EdgeInsets.all(56),
-          maxZoom: 17,
-        ),
-      );
-    } else if (puntos.length == 1) {
-      _mapa.move(puntos.first, 16);
-    }
-  }
-
-  Marker _marcador(LatLng punto, IconData icono, String etiqueta, Color color) {
-    return Marker(
-      point: punto,
-      width: 96,
-      height: 64,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppColors.primaryDark,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              etiqueta,
-              style: AppTypography.body(
-                color: Colors.white,
-                size: 11,
-                weight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Icon(icono, color: color, size: 32),
-        ],
-      ),
     );
   }
 
@@ -303,6 +341,15 @@ class _RastreoScreenState extends State<RastreoScreen> {
               _textoRepartidor(s),
               style: AppTypography.body(color: AppColors.hint, size: 13),
             ),
+            if (_ruta != null && _ruta!.esGoogle) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Ruta por calles (Google Maps): '
+                '${(_ruta!.distanciaM / 1000).toStringAsFixed(1)} km · '
+                '${(_ruta!.duracionS / 60).ceil()} min',
+                style: AppTypography.body(color: AppColors.hint, size: 13),
+              ),
+            ],
           ],
         ],
       ),

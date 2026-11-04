@@ -150,6 +150,11 @@ class PedidoDisponible {
   final double? distanciaKm; // repartidor -> restaurante
   final double? distanciaEntregaKm; // restaurante -> cliente
   final int? minutosEstimados;
+  // Coordenadas para dibujar el pedido en el mapa del repartidor.
+  final double? restauranteLatitud;
+  final double? restauranteLongitud;
+  final double? latitudEntrega;
+  final double? longitudEntrega;
 
   PedidoDisponible({
     required this.id,
@@ -163,6 +168,10 @@ class PedidoDisponible {
     this.distanciaKm,
     this.distanciaEntregaKm,
     this.minutosEstimados,
+    this.restauranteLatitud,
+    this.restauranteLongitud,
+    this.latitudEntrega,
+    this.longitudEntrega,
   });
 
   factory PedidoDisponible.fromJson(Map<String, dynamic> json) {
@@ -178,6 +187,10 @@ class PedidoDisponible {
       distanciaKm: _numeroOpcional(json['distancia_km']),
       distanciaEntregaKm: _numeroOpcional(json['distancia_entrega_km']),
       minutosEstimados: (json['minutos_estimados'] as num?)?.toInt(),
+      restauranteLatitud: _numeroOpcional(json['restaurante_latitud']),
+      restauranteLongitud: _numeroOpcional(json['restaurante_longitud']),
+      latitudEntrega: _numeroOpcional(json['latitud_entrega']),
+      longitudEntrega: _numeroOpcional(json['longitud_entrega']),
     );
   }
 
