@@ -2,6 +2,8 @@
 
 import re
 
+from app.routers import pedidos as pedidos_router
+
 ENTREGA = {"latitud_entrega": 19.6100, "longitud_entrega": -99.3000}
 
 
@@ -186,7 +188,24 @@ def test_estado_de_entrega_y_cobro_en_efectivo(client, menu, cliente, repartidor
     assert cambiar("entregado").status_code == 400  # ya terminado
 
 
-def test_ruta_optima_y_ruta_de_pedido(client, menu, cliente, repartidor):
+def test_un_repartidor_atiende_un_pedido_a_la_vez(client, menu, cliente, repartidor):
+    a = client.post("/pedidos", headers=cliente, json=_pedido_body(menu)).json()["id"]
+    b = client.post("/pedidos", headers=cliente, json=_pedido_body(menu)).json()["id"]
+
+    assert client.put(f"/pedidos/{a}/aceptar", headers=repartidor).status_code == 200
+    r = client.put(f"/pedidos/{b}/aceptar", headers=repartidor)
+    assert r.status_code == 409
+    assert "pedido en curso" in r.json()["detail"]
+
+    # Al entregar el primero ya puede tomar el siguiente.
+    for estado in ("recogido", "en_camino", "entregado"):
+        client.put(f"/pedidos/{a}/estado", headers=repartidor, json={"estado": estado})
+    assert client.put(f"/pedidos/{b}/aceptar", headers=repartidor).status_code == 200
+
+
+def test_ruta_optima_y_ruta_de_pedido(client, menu, cliente, repartidor, monkeypatch):
+    # La ruta óptima (#11) sigue soportando varios pedidos si se sube el límite.
+    monkeypatch.setattr(pedidos_router, "MAX_PEDIDOS_EN_CURSO", 2)
     a = client.post("/pedidos", headers=cliente, json=_pedido_body(menu)).json()["id"]
     b = client.post("/pedidos", headers=cliente, json=_pedido_body(
         menu, restaurante_id=menu["tacos"],

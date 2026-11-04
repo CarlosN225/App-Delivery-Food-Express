@@ -53,3 +53,4 @@ app.*.map.json
 *.log
 firebase*.json
 *-firebase-adminsdk-*.json
+/web/maps_key.js
