@@ -147,4 +147,29 @@ class PedidoService {
     );
     return RutaOptima.fromJson(datos as Map<String, dynamic>);
   }
+  
+  // ------------------------------------------------- rastreo (Sprint 4, #14)
+
+  /// Cliente: estado, posiciones y tiempo restante de su pedido.
+  static Future<Seguimiento> seguimiento(String token, int pedidoId) async {
+    final datos = await ApiClient.get(
+      '/pedidos/$pedidoId/seguimiento',
+      token: token,
+    );
+    return Seguimiento.fromJson(datos as Map<String, dynamic>);
+  }
+
+  /// Repartidor: manda su posición GPS para el rastreo del cliente.
+  static Future<void> reportarUbicacion(
+    String token,
+    int pedidoId,
+    double latitud,
+    double longitud,
+  ) async {
+    await ApiClient.put(
+      '/pedidos/$pedidoId/ubicacion',
+      token: token,
+      body: {'latitud': latitud, 'longitud': longitud},
+    );
+  }
 }

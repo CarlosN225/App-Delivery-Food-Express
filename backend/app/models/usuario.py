@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, Enum
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Enum, true
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -27,6 +27,8 @@ class Usuario(Base):
     contrasena_hash = Column(String(255), nullable=False)
     rol = Column(Enum(RolUsuario), nullable=False, default=RolUsuario.cliente)
     fecha_registro = Column(DateTime, default=datetime.utcnow)
+        # Sprint 4 (#17): el administrador puede desactivar cuentas.
+    activo = Column(Boolean, nullable=False, default=True, server_default=true())
 
     pedidos_como_cliente = relationship(
         "Pedido",

@@ -96,3 +96,22 @@ app/
 └── services/            # security (JWT), logistica (rutas/envío), mercadopago
 tests/                   # pytest
 ```
+## Sprint 4 (#14 a #17)
+
+| Método y ruta | Quién | Para qué |
+|---|---|---|
+| `PUT /pedidos/{id}/ubicacion` | repartidor | Manda su posición GPS en un pedido en curso |
+| `GET /pedidos/{id}/seguimiento` | cliente dueño o administrador | Estado, posiciones, distancia y minutos restantes |
+| `GET /notificaciones?desde_id=` | usuario | Sus notificaciones, más nuevas primero |
+| `GET /notificaciones/no-leidas` | usuario | Cuántas no ha leído |
+| `PUT /notificaciones/{id}/leida` y `PUT /notificaciones/leidas` | usuario | Marcar una o todas como leídas |
+| `POST /notificaciones/token` | usuario | Registrar el token de Firebase del celular |
+| `GET/POST/PUT/DELETE /admin/restaurantes` | administrador | Gestión de restaurantes |
+| `GET /admin/usuarios?rol=&q=` | administrador | Listar y buscar usuarios |
+| `PUT /admin/usuarios/{id}/activo` y `/rol` | administrador | Activar o desactivar una cuenta y cambiar su rol |
+
+**Notificaciones:** sin `FIREBASE_CREDENTIALS` funcionan en modo demo (se guardan y la app las consulta; el servidor escribe `[push demo]` en consola). Con las credenciales de Firebase y `pip install firebase-admin`, además se mandan por FCM.
+
+**Administrador:** el registro público rechaza el rol `administrador`. Crea el primero con `python crear_admin.py correo "Nombre" contrasena`.
+
+**Pruebas nuevas:** `tests/test_seguimiento_sprint4.py`, `tests/test_notificaciones_sprint4.py` y `tests/test_admin_sprint4.py`.

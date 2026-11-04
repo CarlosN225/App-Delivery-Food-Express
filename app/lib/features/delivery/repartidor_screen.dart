@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -41,15 +42,25 @@ class _RepartidorScreenState extends State<RepartidorScreen>
 
   String get _token => widget.usuario.token;
 
-  @override
+  /// Historia #14: temporizador que manda la posición GPS del repartidor.
+  Timer? _gps;
+  bool _reportando = false;
+
+    @override
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
     cargar();
+    // Historia #14: con pedidos en curso, manda la posición cada 10 s.
+    _gps = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _reportarUbicacion(),
+    );
   }
 
   @override
   void dispose() {
+    _gps?.cancel();
     _tabs.dispose();
     super.dispose();
   }
@@ -135,6 +146,28 @@ class _RepartidorScreenState extends State<RepartidorScreen>
     } finally {
       _ocupados.remove(pedidoId);
       if (mounted) setState(() {});
+    }
+  }
+
+  /// Historia #14: manda la posición del repartidor para el rastreo del cliente.
+  Future<void> _reportarUbicacion() async {
+    if (_reportando || activos.isEmpty) return;
+    _reportando = true;
+    try {
+      final pos = await _ubicacion();
+      if (pos == null) return;
+      for (final pedido in List<Pedido>.from(activos)) {
+        await PedidoService.reportarUbicacion(
+          _token,
+          pedido.id,
+          pos.latitude,
+          pos.longitude,
+        );
+      }
+    } catch (_) {
+      // Sin red o sin GPS: se reintenta en el siguiente ciclo.
+    } finally {
+      _reportando = false;
     }
   }
 

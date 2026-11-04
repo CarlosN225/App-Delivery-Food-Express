@@ -46,3 +46,10 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+.venv/
+.venv-*/
+.pytest_cache/
+*.log
+firebase*.json
+*-firebase-adminsdk-*.json

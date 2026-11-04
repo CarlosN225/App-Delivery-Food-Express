@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/location_service.dart';
@@ -11,6 +12,10 @@ import '../restaurants/restaurant_model.dart';
 import '../restaurants/restaurant_service.dart';
 import '../restaurants/menu_screen.dart';
 import '../delivery/repartidor_screen.dart';
+import '../cart/rastreo_screen.dart';
+import '../notificaciones/notificacion_service.dart';
+import '../notificaciones/notificaciones_screen.dart';
+import '../admin/admin_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UsuarioAutenticado usuario;
@@ -30,11 +35,32 @@ class _HomeScreenState extends State<HomeScreen> {
   bool cargando = false;
   String? mensajeError;
 
+  // --- Notificaciones (Sprint 4, historia #15) ---
+  Timer? _temporizadorNotificaciones;
+  int noLeidas = 0;
+  int _ultimoNotificacionId = 0;
+  bool _primeraSincronizacion = true;
+
   @override
   void initState() {
     super.initState();
 
     buscarRestaurantes();
+
+    // Historia #15: el cliente revisa sus notificaciones cada 10 segundos.
+    if (widget.usuario.rol == 'cliente') {
+      _sincronizarNotificaciones();
+      _temporizadorNotificaciones = Timer.periodic(
+        const Duration(seconds: 10),
+        (_) => _sincronizarNotificaciones(),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _temporizadorNotificaciones?.cancel();
+    super.dispose();
   }
 
   Future<void> buscarRestaurantes() async {
@@ -76,6 +102,90 @@ print('LONGITUD: ${posicion?.longitude}');
 
       print('Error: $e');
     }
+  }
+
+  Future<void> _sincronizarNotificaciones() async {
+    final token = widget.usuario.token;
+    try {
+      final nuevas = await NotificacionService.listar(
+        token,
+        desdeId: _ultimoNotificacionId,
+        limite: _primeraSincronizacion ? 1 : 20,
+      );
+      final pendientes = await NotificacionService.noLeidas(token);
+      if (!mounted) return;
+
+      // La más nueva viene primero.
+      if (nuevas.isNotEmpty) _ultimoNotificacionId = nuevas.first.id;
+
+      // La primera vez solo se toma nota de las que ya existen (sin avisos).
+      if (!_primeraSincronizacion && nuevas.isNotEmpty) {
+        _mostrarAviso(nuevas.first);
+      }
+      _primeraSincronizacion = false;
+      setState(() => noLeidas = pendientes);
+    } catch (_) {
+      // Sin red: se reintenta en el siguiente ciclo.
+    }
+  }
+
+  void _mostrarAviso(Notificacion n) {
+    final pedidoId = n.pedidoId;
+    final mensajero = ScaffoldMessenger.of(context);
+    mensajero.hideCurrentSnackBar();
+    mensajero.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.primaryDark,
+        duration: const Duration(seconds: 6),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              n.titulo,
+              style: AppTypography.body(
+                color: Colors.white,
+                weight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              n.mensaje,
+              style: AppTypography.body(color: Colors.white, size: 13),
+            ),
+          ],
+        ),
+        action: pedidoId == null
+            ? null
+            : SnackBarAction(
+                label: 'Ver',
+                textColor: AppColors.mint,
+                onPressed: () => _abrirRastreo(pedidoId),
+              ),
+      ),
+    );
+  }
+
+  void _abrirRastreo(int pedidoId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RastreoScreen(
+          usuario: widget.usuario,
+          pedidoId: pedidoId,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirNotificaciones() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotificacionesScreen(usuario: widget.usuario),
+      ),
+    );
+    if (mounted) _sincronizarNotificaciones();
   }
 
   @override
@@ -127,6 +237,15 @@ print('LONGITUD: ${posicion?.longitude}');
             ),
           ],
           if (widget.usuario.rol == 'repartidor')
+                      IconButton(
+              tooltip: 'Notificaciones',
+              icon: Badge(
+                isLabelVisible: noLeidas > 0,
+                label: Text('$noLeidas'),
+                child: const Icon(Icons.notifications_outlined),
+              ),
+              onPressed: _abrirNotificaciones,
+            ),
   IconButton(
     icon: const Icon(Icons.delivery_dining),
     tooltip: 'Panel del repartidor',
@@ -140,7 +259,21 @@ print('LONGITUD: ${posicion?.longitude}');
         ),
       );
     },
+  
   ),
+            if (widget.usuario.rol == 'administrador')
+            IconButton(
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              tooltip: 'Panel administrativo',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AdminScreen(usuario: widget.usuario),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Buscar restaurantes',

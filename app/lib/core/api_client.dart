@@ -65,6 +65,9 @@ class ApiClient {
         ),
       );
 
+  static Future<dynamic> delete(String ruta, {String? token}) =>
+      _enviar(() => http.delete(_uri(ruta, null), headers: _headers(token)));
+      
   static Future<dynamic> _enviar(
     Future<http.Response> Function() peticion,
   ) async {

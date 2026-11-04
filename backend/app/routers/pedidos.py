@@ -11,6 +11,7 @@ Los precios y el total los calcula siempre el backend a partir de la base de
 datos; la app solo manda qué productos y cuántos.
 """
 
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
@@ -39,8 +40,10 @@ from app.schemas.pedido import (
     PedidoCrear,
     PedidoDisponibleOut,
     PedidoOut,
+    SeguimientoOut,
+    UbicacionIn,
 )
-from app.services import logistica
+from app.services import logistica, notificaciones
 
 router = APIRouter(prefix="/pedidos", tags=["Pedidos"])
 
@@ -398,11 +401,9 @@ def aceptar_pedido(
         raise HTTPException(status_code=400, detail="Este pedido ya no está disponible.")
 
     db.refresh(pedido)
+    notificaciones.notificar_estado(db, pedido)   # <-- NUEVA
     return {
         "mensaje": "Pedido aceptado correctamente.",
-        "pedido_id": pedido.id,
-        "estado": pedido.estado.value,
-        "repartidor_id": pedido.repartidor_id,
     }
 
 
@@ -472,7 +473,10 @@ def actualizar_estado(
 
     db.commit()
     db.refresh(pedido)
+    notificaciones.notificar_estado(db, pedido)   # <-- NUEVA
     return _pedido_a_dict(pedido)
+    
+
 
 
 # --------------------------------------------------------------------------
@@ -572,3 +576,84 @@ def ruta_de_un_pedido(
     ruta["pedido_id"] = pedido.id
     ruta["estado"] = pedido.estado.value
     return ruta
+
+
+
+# --------------------------------------------------------------------------
+# Seguimiento en tiempo real (#14)
+# --------------------------------------------------------------------------
+
+@router.put("/{pedido_id}/ubicacion")
+def reportar_ubicacion(
+    pedido_id: int,
+    datos: UbicacionIn,
+    db: Session = Depends(get_db),
+    repartidor: Usuario = Depends(requerir_rol(RolUsuario.repartidor)),
+):
+    """El repartidor manda su posición GPS mientras lleva el pedido."""
+    pedido = _pedido_del_repartidor(db, pedido_id, repartidor)
+    if pedido.estado not in ESTADOS_ACTIVOS:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo puedes reportar tu ubicación en un pedido en curso.",
+        )
+    pedido.latitud_repartidor = datos.latitud
+    pedido.longitud_repartidor = datos.longitud
+    pedido.ubicacion_actualizada = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/{pedido_id}/seguimiento", response_model=SeguimientoOut)
+def seguimiento_pedido(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """
+    Estado, posiciones (restaurante, cliente y repartidor) y tiempo restante
+    de un pedido. Solo lo ve el cliente dueño del pedido (o un administrador).
+    """
+    pedido = _obtener_pedido(db, pedido_id)
+    es_dueno = pedido.cliente_id == usuario.id
+    es_admin = usuario.rol == RolUsuario.administrador
+    if not (es_dueno or es_admin):
+        raise HTTPException(status_code=403, detail="No tienes acceso a este pedido.")
+
+    rc = _coord_restaurante(pedido.restaurante)
+    ec = _coord_entrega(pedido)
+    rep = None
+    if pedido.latitud_repartidor is not None and pedido.longitud_repartidor is not None:
+        rep = (float(pedido.latitud_repartidor), float(pedido.longitud_repartidor))
+
+    # Distancia que falta: repartidor -> (restaurante, si aún no recoge) -> cliente.
+    distancia = minutos = None
+    if pedido.estado in ESTADOS_ACTIVOS and ec is not None:
+        paradas = [rc, ec] if pedido.estado == EstadoPedido.aceptado and rc else [ec]
+        puntos = [rep or rc or ec] + paradas
+        distancia = sum(
+            logistica.haversine_km(*a, *b) for a, b in zip(puntos, puntos[1:])
+        )
+        minutos = logistica.minutos_estimados(distancia)
+
+    segundos = None
+    if pedido.ubicacion_actualizada is not None:
+        segundos = max(
+            0, int((datetime.utcnow() - pedido.ubicacion_actualizada).total_seconds())
+        )
+
+    return {
+        "pedido_id": pedido.id,
+        "estado": pedido.estado,
+        "restaurante": pedido.restaurante.nombre,
+        "repartidor_nombre": pedido.repartidor.nombre if pedido.repartidor else None,
+        "restaurante_latitud": rc[0] if rc else None,
+        "restaurante_longitud": rc[1] if rc else None,
+        "cliente_latitud": ec[0] if ec else None,
+        "cliente_longitud": ec[1] if ec else None,
+        "repartidor_latitud": rep[0] if rep else None,
+        "repartidor_longitud": rep[1] if rep else None,
+        "segundos_desde_ubicacion": segundos,
+        "distancia_restante_km": round(distancia, 2) if distancia is not None else None,
+        "minutos_restantes": minutos,
+    }

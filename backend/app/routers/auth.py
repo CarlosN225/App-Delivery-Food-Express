@@ -24,6 +24,14 @@ def registrar_usuario(datos: UsuarioCreate, db: Session = Depends(get_db)):
     Historia #2 — Registro de clientes y repartidores.
     El rol (cliente/repartidor/administrador) se define en el body de la petición.
     """
+        # Sprint 4 (#16): nadie puede crearse una cuenta de administrador por su
+    # cuenta; solo otro administrador puede dar ese rol (panel o crear_admin.py).
+    if datos.rol == RolUsuario.administrador:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Las cuentas de administrador las crea otro administrador.",
+        )
+        
     existente = db.query(Usuario).filter(Usuario.correo == datos.correo).first()
     if existente:
         raise HTTPException(
@@ -60,7 +68,11 @@ def iniciar_sesion(
             detail="Correo o contraseña incorrectos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
+    if not usuario.activo:
+            raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu cuenta está desactivada. Contacta al administrador.",
+        )
     token = crear_access_token(datos={"sub": usuario.correo, "rol": usuario.rol.value})
     return {"access_token": token, "token_type": "bearer"}
 
@@ -79,7 +91,7 @@ def obtener_usuario_actual(
 
     correo = payload.get("sub")
     usuario = db.query(Usuario).filter(Usuario.correo == correo).first()
-    if usuario is None:
+    if usuario is None or not usuario.activo:
         raise credenciales_invalidas
     return usuario
 

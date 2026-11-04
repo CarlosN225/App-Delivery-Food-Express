@@ -81,3 +81,31 @@ class PedidoDisponibleOut(BaseModel):
 
 class CambioEstado(BaseModel):
     estado: EstadoPedido
+
+
+
+class UbicacionIn(BaseModel):
+    """Posición GPS que reporta el repartidor (Sprint 4, historia #14)."""
+
+    latitud: float = Field(ge=-90, le=90)
+    longitud: float = Field(ge=-180, le=180)
+
+
+class SeguimientoOut(BaseModel):
+    """Lo que necesita la pantalla «Rastreo de tu pedido» del cliente."""
+
+    pedido_id: int
+    estado: EstadoPedido
+    restaurante: str
+    repartidor_nombre: Optional[str] = None
+    restaurante_latitud: Optional[float] = None
+    restaurante_longitud: Optional[float] = None
+    cliente_latitud: Optional[float] = None
+    cliente_longitud: Optional[float] = None
+    repartidor_latitud: Optional[float] = None
+    repartidor_longitud: Optional[float] = None
+    # Segundos desde la última posición del repartidor (None si aún no reporta).
+    segundos_desde_ubicacion: Optional[int] = None
+    # Lo que falta para llegar al cliente (None si el pedido no está en curso).
+    distancia_restante_km: Optional[float] = None
+    minutos_restantes: Optional[int] = None

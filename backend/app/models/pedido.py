@@ -74,6 +74,9 @@ class Pedido(Base):
     direccion_entrega = Column(String(255), nullable=True)
     latitud_entrega = Column(Float, nullable=True)
     longitud_entrega = Column(Float, nullable=True)
+    latitud_repartidor = Column(Float, nullable=True)
+    longitud_repartidor = Column(Float, nullable=True)
+    ubicacion_actualizada = Column(DateTime, nullable=True)
 
     metodo_pago = Column(Enum(MetodoPago), nullable=True)
     estado_pago = Column(Enum(EstadoPago), nullable=True)

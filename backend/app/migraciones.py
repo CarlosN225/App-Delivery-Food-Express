@@ -22,6 +22,13 @@ COLUMNAS_PEDIDOS = {
     "fecha_actualizacion": "DATETIME",
 }
 
+# Sprint 4 (#14): ubicación del repartidor dentro del pedido.
+COLUMNAS_PEDIDOS_SPRINT4 = {
+    "latitud_repartidor": "FLOAT",
+    "longitud_repartidor": "FLOAT",
+    "ubicacion_actualizada": "DATETIME",
+}
+
 ESTADOS_PEDIDO = "'pendiente','aceptado','recogido','en_camino','entregado','cancelado'"
 
 
@@ -63,3 +70,25 @@ def aplicar_migraciones(engine) -> None:
                     f"ENUM({ESTADOS_PEDIDO}) NOT NULL DEFAULT 'pendiente'"
                 )
             )
+            
+    sprint4 = {
+        n: t for n, t in COLUMNAS_PEDIDOS_SPRINT4.items() if n not in existentes
+    }
+    if sprint4:
+        with engine.begin() as conexion:
+            for nombre, tipo in sprint4.items():
+                conexion.execute(
+                    text(f"ALTER TABLE pedidos ADD COLUMN {nombre} {tipo}")
+                )
+
+    # Sprint 4 (#17): los usuarios pueden desactivarse desde el panel admin.
+    if "usuarios" in inspector.get_table_names():
+        columnas_usuarios = {c["name"] for c in inspector.get_columns("usuarios")}
+        if "activo" not in columnas_usuarios:
+            with engine.begin() as conexion:
+                conexion.execute(
+                    text(
+                        "ALTER TABLE usuarios "
+                        "ADD COLUMN activo BOOLEAN NOT NULL DEFAULT 1"
+                    )
+                )

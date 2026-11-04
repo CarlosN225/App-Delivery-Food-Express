@@ -10,6 +10,7 @@ import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
 import 'pago_screen.dart';
+import 'rastreo_screen.dart';
 
 /// Abre "Mis pedidos" dejando la pantalla de inicio como única pantalla anterior.
 void irAMisPedidos(
@@ -128,6 +129,18 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
     await _cargar(silencioso: true);
   }
 
+  void _rastrear(Pedido pedido) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RastreoScreen(
+          usuario: widget.usuario,
+          pedidoId: pedido.id,
+        ),
+      ),
+    );
+  }
+
   Future<void> _pagar(Pedido pedido) async {
     await Navigator.push(
       context,
@@ -225,6 +238,17 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
             Text(resumen, style: AppTypography.body(color: AppColors.hint, size: 13)),
           const SizedBox(height: 10),
           if (pedido.estado != 'cancelado') _ProgresoEntrega(estado: pedido.estado),
+                    if (pedido.activo) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlineActionButton(
+                label: 'Rastrear pedido',
+                icon: Icons.location_on_outlined,
+                onPressed: () => _rastrear(pedido),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

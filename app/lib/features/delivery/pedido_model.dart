@@ -279,3 +279,55 @@ class PreferenciaPago {
 
   bool get esDemo => modo == 'demo';
 }
+
+
+/// Estado de rastreo del pedido (Sprint 4, historia #14).
+class Seguimiento {
+  final int pedidoId;
+  final String estado;
+  final String restaurante;
+  final String? repartidorNombre;
+  final double? restauranteLatitud;
+  final double? restauranteLongitud;
+  final double? clienteLatitud;
+  final double? clienteLongitud;
+  final double? repartidorLatitud;
+  final double? repartidorLongitud;
+  final int? segundosDesdeUbicacion;
+  final double? distanciaRestanteKm;
+  final int? minutosRestantes;
+
+  Seguimiento({
+    required this.pedidoId,
+    required this.estado,
+    required this.restaurante,
+    this.repartidorNombre,
+    this.restauranteLatitud,
+    this.restauranteLongitud,
+    this.clienteLatitud,
+    this.clienteLongitud,
+    this.repartidorLatitud,
+    this.repartidorLongitud,
+    this.segundosDesdeUbicacion,
+    this.distanciaRestanteKm,
+    this.minutosRestantes,
+  });
+
+  factory Seguimiento.fromJson(Map<String, dynamic> json) {
+    return Seguimiento(
+      pedidoId: json['pedido_id'] as int,
+      estado: json['estado'] as String,
+      restaurante: json['restaurante'] as String,
+      repartidorNombre: json['repartidor_nombre'] as String?,
+      restauranteLatitud: _numeroOpcional(json['restaurante_latitud']),
+      restauranteLongitud: _numeroOpcional(json['restaurante_longitud']),
+      clienteLatitud: _numeroOpcional(json['cliente_latitud']),
+      clienteLongitud: _numeroOpcional(json['cliente_longitud']),
+      repartidorLatitud: _numeroOpcional(json['repartidor_latitud']),
+      repartidorLongitud: _numeroOpcional(json['repartidor_longitud']),
+      segundosDesdeUbicacion: json['segundos_desde_ubicacion'] as int?,
+      distanciaRestanteKm: _numeroOpcional(json['distancia_restante_km']),
+      minutosRestantes: json['minutos_restantes'] as int?,
+    );
+  }
+}
