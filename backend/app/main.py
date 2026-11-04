@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
 from app import models
 from app.migraciones import aplicar_migraciones
-from app.routers import auth, restaurantes, productos, pedidos, pagos, notificaciones, admin
+from app.routers import auth, restaurantes, productos, pedidos, pagos, notificaciones, admin, mapas
 
 
 # Crea las tablas automáticamente si no existen y agrega a `pedidos` las
@@ -37,6 +37,7 @@ app.include_router(pedidos.router)
 app.include_router(pagos.router)
 app.include_router(notificaciones.router)
 app.include_router(admin.router)
+app.include_router(mapas.router)
 
 
 @app.get("/", tags=["Salud"])
