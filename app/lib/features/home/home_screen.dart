@@ -7,6 +7,7 @@ import '../../core/location_service.dart';
 import '../admin/admin_screen.dart';
 import '../auth/auth_service.dart';
 import '../auth/login_screen.dart';
+import '../auth/sesion_service.dart';
 import '../cart/carrito_screen.dart';
 import '../cart/carrito_service.dart';
 import '../cart/mis_pedidos_screen.dart';
@@ -14,6 +15,7 @@ import '../cart/rastreo_screen.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
 import '../delivery/repartidor_screen.dart';
+import '../maps/mapas_service.dart';
 import '../notificaciones/notificacion_service.dart';
 import '../notificaciones/notificaciones_screen.dart';
 import '../restaurants/menu_screen.dart';
@@ -96,6 +98,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Timer? _temporizador;
 
+  // Ubicación detectada por el GPS y su dirección escrita (geocodificación
+  // inversa del backend). Se muestra en «Entregar en».
+  String? _direccionActual;
+  bool _detectandoDireccion = false;
+  bool _sinUbicacion = false;
+  double? _latDetectada;
+  double? _lonDetectada;
+  double? _latDireccion;
+  double? _lonDireccion;
+
   // Notificaciones (Sprint 4, historia #15)
   Timer? _temporizadorNotificaciones;
   int noLeidas = 0;
@@ -136,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _temporizador?.cancel();
     _temporizadorNotificaciones?.cancel();
+    _quitarAvisoPedido();
     _busquedaController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -145,8 +158,13 @@ class _HomeScreenState extends State<HomeScreen> {
   // UBICACIÓN Y RESTAURANTES REALES
   // =====================================================
 
-  Future<void> buscarRestaurantes() async {
+  Future<void> buscarRestaurantes({bool forzarDireccion = false}) async {
     if (!mounted) return;
+
+    if (forzarDireccion) {
+      _latDireccion = null;
+      _lonDireccion = null;
+    }
 
     setState(() {
       cargando = true;
@@ -161,6 +179,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (posicion == null) {
         setState(() {
+          _sinUbicacion = true;
+          _direccionActual = null;
           cargando = false;
           mensajeError =
               'No se pudo obtener tu ubicación. '
@@ -168,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         return;
       }
+
+      _sinUbicacion = false;
+      // La dirección se busca en paralelo: no retrasa la lista de restaurantes.
+      _detectarDireccion(posicion.latitude, posicion.longitude);
 
       final resultados =
           await RestauranteService.obtenerRestaurantesCercanos(
@@ -197,6 +221,186 @@ class _HomeScreenState extends State<HomeScreen> {
             'No se pudieron cargar los restaurantes.';
       });
     }
+  }
+
+  /// Convierte las coordenadas del GPS en una dirección legible. Solo vuelve
+  /// a preguntar si te moviste más de ~100 m (ahorra cuota de Google).
+  Future<void> _detectarDireccion(double lat, double lon) async {
+    _latDetectada = lat;
+    _lonDetectada = lon;
+
+    final lat0 = _latDireccion;
+    final lon0 = _lonDireccion;
+    if (_direccionActual != null && lat0 != null && lon0 != null) {
+      final dy = (lat - lat0) * 111000;
+      final dx = (lon - lon0) * 104000;
+      if (dx * dx + dy * dy < 100 * 100) return;
+    }
+
+    if (mounted) setState(() => _detectandoDireccion = true);
+    try {
+      final direccion = await MapasService.direccionDe(
+        widget.usuario.token,
+        lat,
+        lon,
+      );
+      if (!mounted) return;
+      setState(() {
+        _direccionActual = direccion.trim().isEmpty ? null : direccion.trim();
+        _latDireccion = lat;
+        _lonDireccion = lon;
+        _detectandoDireccion = false;
+      });
+    } catch (e) {
+      debugPrint('No se pudo obtener la dirección: $e');
+      if (mounted) setState(() => _detectandoDireccion = false);
+    }
+  }
+
+  /// Calle y colonia, sin el municipio ni el país (cabe en el encabezado).
+  String get _direccionCorta {
+    final partes = (_direccionActual ?? '')
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    return partes.take(2).join(', ');
+  }
+
+  String get _textoUbicacion {
+    if (_sinUbicacion) return 'Activa tu ubicación';
+    if (_direccionActual != null) return _direccionCorta;
+    if (_detectandoDireccion) return 'Detectando tu ubicación…';
+    return 'Tu ubicación actual';
+  }
+
+  /// Detalle de «Entregar en»: dirección completa y botón para volver a
+  /// detectar dónde estás.
+  Future<void> _abrirUbicacion() async {
+    final actualizar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final direccion = _direccionActual;
+        final lat = _latDetectada;
+        final lon = _lonDetectada;
+
+        final String detalle;
+        if (_sinUbicacion) {
+          detalle = 'No pudimos leer tu ubicación. Activa el GPS y da permiso '
+              'al navegador para ver los restaurantes que te quedan cerca.';
+        } else if (direccion != null) {
+          detalle = direccion;
+        } else if (lat != null && lon != null) {
+          detalle = 'Aún no tenemos la dirección escrita de este punto.';
+        } else {
+          detalle = 'Estamos detectando dónde estás…';
+        }
+
+        const rotulo = TextStyle(
+          color: grisTexto,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
+        );
+
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: const RoundedRectangleBorder(
+            side: BorderSide(color: grisBorde),
+          ),
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('ENTREGAR EN', style: rotulo),
+              SizedBox(height: 4),
+              Text(
+                'Tu ubicación actual',
+                style: TextStyle(
+                  color: verdeOscuro,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _sinUbicacion
+                          ? Icons.location_off_outlined
+                          : Icons.location_on_outlined,
+                      color: _sinUbicacion
+                          ? const Color(0xFFD1495B)
+                          : turquesa,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        detalle,
+                        style: const TextStyle(
+                          color: verdeOscuro,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (lat != null && lon != null && !_sinUbicacion) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}',
+                    style: const TextStyle(color: grisTexto, fontSize: 12.5),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                const Text(
+                  'Con esta ubicación buscamos los restaurantes cercanos. '
+                  'La dirección exacta de tu pedido la marcas en el mapa al '
+                  'confirmar.',
+                  style: TextStyle(color: grisTexto, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text(
+                'CERRAR',
+                style: TextStyle(
+                  color: grisTexto,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'ACTUALIZAR UBICACIÓN',
+                style: TextStyle(
+                  color: turquesa,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (actualizar == true) buscarRestaurantes(forzarDireccion: true);
   }
 
   // =====================================================
@@ -334,48 +538,121 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _mostrarAviso(Notificacion n) {
-    final pedidoId = n.pedidoId;
-    final mensajero = ScaffoldMessenger.of(context);
+  OverlayEntry? _avisoEntrada;
+  Timer? _avisoTemporizador;
 
-    mensajero.hideCurrentSnackBar();
-    mensajero.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: verdeOscuro,
-        duration: const Duration(seconds: 6),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              n.titulo,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
+  void _quitarAvisoPedido() {
+    _avisoTemporizador?.cancel();
+    _avisoTemporizador = null;
+    try {
+      _avisoEntrada?.remove();
+    } catch (_) {
+      // Ya se había quitado.
+    }
+    _avisoEntrada = null;
+  }
+
+  /// Aviso de notificación nueva. Solo sale cuando estás en el inicio:
+  /// sobre el rastreo, el mapa o cualquier otra pantalla no se muestra
+  /// (te llega igual a la campana y a "Notificaciones").
+  void _mostrarAviso(Notificacion n) {
+    if (!mounted) return;
+    final ruta = ModalRoute.of(context);
+    if (ruta == null || !ruta.isCurrent) return;
+
+    final capa = Overlay.maybeOf(context);
+    if (capa == null) return;
+
+    final pedidoId = n.pedidoId;
+    _quitarAvisoPedido();
+
+    final entrada = OverlayEntry(
+      builder: (contexto) {
+        final ancho = MediaQuery.of(contexto).size.width - 32;
+        return Positioned(
+          top: 100,
+          right: 16,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: ancho < 320 ? ancho : 320,
+            ),
+            child: Material(
+              color: Colors.white,
+              elevation: 6,
+              child: InkWell(
+                onTap: () {
+                  _quitarAvisoPedido();
+                  if (pedidoId != null) _abrirRastreo(pedidoId);
+                },
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: const Color(0xFFD3E2DF)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Icon(
+                          Icons.notifications_none,
+                          size: 18,
+                          color: verdeOscuro,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              n.titulo,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: verdeOscuro,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              n.mensaje,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF4A5E5B),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 16,
+                        onPressed: _quitarAvisoPedido,
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            Text(
-              n.mensaje,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-        action: pedidoId == null
-            ? null
-            : SnackBarAction(
-                label: 'Ver',
-                textColor: verdeClaro,
-                onPressed: () => _abrirRastreo(pedidoId),
-              ),
-      ),
+          ),
+        );
+      },
     );
+
+    _avisoEntrada = entrada;
+    capa.insert(entrada);
+    _avisoTemporizador = Timer(const Duration(seconds: 5), _quitarAvisoPedido);
   }
 
   Future<void> _abrirRastreo(int pedidoId) async {
+    _quitarAvisoPedido();
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -390,6 +667,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _abrirNotificaciones() async {
+    _quitarAvisoPedido();
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -623,6 +901,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _cerrarSesion() {
+    SesionService.borrar();
     CarritoService.instance.vaciar();
 
     Navigator.of(context).pushAndRemoveUntil(
@@ -784,27 +1063,85 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Etiqueta y color según el panel en el que está la persona.
+  String get _etiquetaRol {
+    switch (widget.usuario.rol) {
+      case 'repartidor':
+        return 'REPARTIDOR';
+      case 'administrador':
+        return 'ADMINISTRADOR';
+      default:
+        return 'CLIENTE';
+    }
+  }
+
+  Color get _colorRol {
+    switch (widget.usuario.rol) {
+      case 'repartidor':
+        return const Color(0xFF1F6FEB);
+      case 'administrador':
+        return const Color(0xFF8A5A00);
+      default:
+        return turquesa;
+    }
+  }
+
   Widget _cuenta() {
     return PopupMenuButton<String>(
       tooltip: 'Mi cuenta',
+      color: Colors.white,
+      elevation: 3,
+      offset: const Offset(0, 48),
+      shape: const RoundedRectangleBorder(
+        side: BorderSide(color: grisBorde),
+      ),
       onSelected: (valor) {
         if (valor == 'salir') {
           _cerrarSesion();
         }
 
         if (valor == 'actualizar') {
-          buscarRestaurantes();
+          buscarRestaurantes(forzarDireccion: true);
         }
       },
       itemBuilder: (_) => [
         PopupMenuItem<String>(
           enabled: false,
-          child: Text(
-            widget.usuario.nombre,
-            style: const TextStyle(
-              color: verdeOscuro,
-              fontWeight: FontWeight.bold,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
+                ),
+                color: _colorRol,
+                child: Text(
+                  _etiquetaRol,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.usuario.nombre,
+                style: const TextStyle(
+                  color: verdeOscuro,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (widget.usuario.correo.isNotEmpty)
+                Text(
+                  widget.usuario.correo,
+                  style: const TextStyle(color: grisTexto, fontSize: 12.5),
+                ),
+            ],
           ),
         ),
         const PopupMenuDivider(),
@@ -898,49 +1235,72 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Ubicación en dos líneas (escritorio).
+  // Ubicación en dos líneas (escritorio). Muestra la dirección detectada por
+  // el GPS; al tocarla se abre el detalle con el botón de actualizar.
   Widget _ubicacion() {
-    return InkWell(
-      onTap: buscarRestaurantes,
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.location_on_outlined,
-            color: verdeOscuro,
-            size: 29,
-          ),
-          SizedBox(width: 10),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Entregar en',
-                style: TextStyle(
-                  color: grisTexto,
-                  fontSize: 13,
+    return Tooltip(
+      message: 'Ver o actualizar mi ubicación',
+      child: InkWell(
+        onTap: _abrirUbicacion,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _sinUbicacion
+                  ? Icons.location_off_outlined
+                  : Icons.location_on_outlined,
+              color: _sinUbicacion ? const Color(0xFFD1495B) : verdeOscuro,
+              size: 29,
+            ),
+            const SizedBox(width: 10),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Entregar en',
+                  style: TextStyle(color: grisTexto, fontSize: 13),
                 ),
-              ),
-              Row(
-                children: [
-                  Text(
-                    'Tu ubicación actual',
-                    style: TextStyle(
-                      color: verdeOscuro,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                Row(
+                  children: [
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 250),
+                      child: Text(
+                        _textoUbicacion,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _sinUbicacion
+                              ? const Color(0xFFD1495B)
+                              : verdeOscuro,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                  ),
-                  Icon(
-                    Icons.keyboard_arrow_down,
-                    color: verdeOscuro,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
+                    if (_detectandoDireccion && _direccionActual == null)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: turquesa,
+                          ),
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: verdeOscuro,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -950,34 +1310,39 @@ class _HomeScreenState extends State<HomeScreen> {
     return Align(
       alignment: Alignment.centerLeft,
       child: InkWell(
-        onTap: buscarRestaurantes,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 6),
+        onTap: _abrirUbicacion,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.location_on_outlined,
-                color: verdeOscuro,
+                _sinUbicacion
+                    ? Icons.location_off_outlined
+                    : Icons.location_on_outlined,
+                color: _sinUbicacion ? const Color(0xFFD1495B) : verdeOscuro,
                 size: 19,
               ),
-              SizedBox(width: 6),
-              Text(
+              const SizedBox(width: 6),
+              const Text(
                 'Entregar en ',
-                style: TextStyle(
-                  color: grisTexto,
-                  fontSize: 13,
+                style: TextStyle(color: grisTexto, fontSize: 13),
+              ),
+              Flexible(
+                child: Text(
+                  _textoUbicacion,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _sinUbicacion
+                        ? const Color(0xFFD1495B)
+                        : verdeOscuro,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              Text(
-                'Tu ubicación actual',
-                style: TextStyle(
-                  color: verdeOscuro,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Icon(
+              const Icon(
                 Icons.keyboard_arrow_down,
                 color: verdeOscuro,
                 size: 19,
@@ -1040,7 +1405,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Row(
               children: [
-                _logo(124),
+                _logo(98),
                 const Spacer(),
                 if (_esCliente)
                   IconButton(
@@ -1082,7 +1447,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      height: 102,
+      height: 88,
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(
@@ -1094,7 +1459,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          _logo(160),
+          _logo(126),
           const SizedBox(width: 40),
           _ubicacion(),
           const SizedBox(width: 40),

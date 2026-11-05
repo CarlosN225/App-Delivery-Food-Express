@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'core/theme.dart';
-import 'features/auth/login_screen.dart';
+import 'features/auth/puerta_sesion.dart';
 
 void main() {
   runApp(const FoodExpressApp());
@@ -15,7 +15,7 @@ class FoodExpressApp extends StatelessWidget {
       title: 'Food Express',
       debugShowCheckedModeBanner: false,
       theme: buildFoodExpressTheme(),
-      home: const LoginScreen(),
+      home: const PuertaSesion(),
     );
   }
 }

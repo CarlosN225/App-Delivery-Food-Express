@@ -11,28 +11,61 @@ class RutaMapa {
   final int duracionS;
   final List<LatLng> puntos;
 
+  /// Un trazo por tramo: ir al restaurante y/o llevar al cliente.
+  final List<TramoRuta> tramos;
+
   const RutaMapa({
     required this.fuente,
     required this.distanciaM,
     required this.duracionS,
     required this.puntos,
+    this.tramos = const [],
   });
 
   bool get esGoogle => fuente == 'google';
 
   factory RutaMapa.fromJson(Map<String, dynamic> json) {
-    final crudos = (json['puntos'] as List<dynamic>?) ?? const [];
     return RutaMapa(
       fuente: json['fuente'] as String? ?? 'linea_recta',
       distanciaM: (json['distancia_m'] as num?)?.toInt() ?? 0,
       duracionS: (json['duracion_s'] as num?)?.toInt() ?? 0,
-      puntos: crudos.map((p) {
-        final par = p as List<dynamic>;
-        return LatLng(
-          (par[0] as num).toDouble(),
-          (par[1] as num).toDouble(),
-        );
-      }).toList(),
+      puntos: _puntos(json['puntos']),
+      tramos: ((json['tramos'] as List<dynamic>?) ?? const [])
+          .map((t) => TramoRuta.fromJson(t as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+List<LatLng> _puntos(dynamic crudos) {
+  return ((crudos as List<dynamic>?) ?? const []).map((p) {
+    final par = p as List<dynamic>;
+    return LatLng((par[0] as num).toDouble(), (par[1] as num).toDouble());
+  }).toList();
+}
+
+/// Un tramo de la ruta: 'hacia_restaurante' o 'hacia_cliente'.
+class TramoRuta {
+  final String tipo;
+  final int distanciaM;
+  final int duracionS;
+  final List<LatLng> puntos;
+
+  const TramoRuta({
+    required this.tipo,
+    required this.distanciaM,
+    required this.duracionS,
+    required this.puntos,
+  });
+
+  bool get haciaRestaurante => tipo == 'hacia_restaurante';
+
+  factory TramoRuta.fromJson(Map<String, dynamic> json) {
+    return TramoRuta(
+      tipo: json['tipo'] as String? ?? 'hacia_cliente',
+      distanciaM: (json['distancia_m'] as num?)?.toInt() ?? 0,
+      duracionS: (json['duracion_s'] as num?)?.toInt() ?? 0,
+      puntos: _puntos(json['puntos']),
     );
   }
 }
@@ -80,9 +113,38 @@ class MapasService {
     return DireccionGeocodificada.fromJson(datos as Map<String, dynamic>);
   }
 
-  /// Trazo por calles del pedido (Routes API).
-  static Future<RutaMapa> rutaDePedido(String token, int pedidoId) async {
-    final datos = await ApiClient.get('/mapas/ruta/$pedidoId', token: token);
+  /// Punto del mapa -> dirección (cuando el cliente mueve el pin).
+  static Future<String> direccionDe(
+    String token,
+    double latitud,
+    double longitud,
+  ) async {
+    final datos = await ApiClient.post(
+      '/mapas/direccion',
+      token: token,
+      body: {'latitud': latitud, 'longitud': longitud},
+    );
+    return (datos as Map<String, dynamic>)['direccion_formateada'] as String? ??
+        '';
+  }
+
+  /// Trazo por calles del pedido (Routes API). Si el repartidor manda su
+  /// posición en vivo ([desde]), el trazo sale de donde está.
+  static Future<RutaMapa> rutaDePedido(
+    String token,
+    int pedidoId, {
+    LatLng? desde,
+  }) async {
+    final datos = await ApiClient.get(
+      '/mapas/ruta/$pedidoId',
+      token: token,
+      query: desde == null
+          ? null
+          : {
+              'lat': desde.latitude.toStringAsFixed(6),
+              'lng': desde.longitude.toStringAsFixed(6),
+            },
+    );
     return RutaMapa.fromJson(datos as Map<String, dynamic>);
   }
 }

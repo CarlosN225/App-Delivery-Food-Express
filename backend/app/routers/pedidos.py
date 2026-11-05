@@ -11,7 +11,7 @@ Los precios y el total los calcula siempre el backend a partir de la base de
 datos; la app solo manda qué productos y cuántos.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
@@ -43,7 +43,7 @@ from app.schemas.pedido import (
     SeguimientoOut,
     UbicacionIn,
 )
-from app.services import logistica, notificaciones
+from app.services import google_maps, logistica, notificaciones
 
 router = APIRouter(prefix="/pedidos", tags=["Pedidos"])
 
@@ -134,6 +134,17 @@ def _cotizar(db: Session, datos: CotizacionIn):
     )
     if restaurante is None:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado.")
+
+    # La entrega debe quedar dentro de la zona de servicio. Se valida aquí
+    # (y no solo en la app) para no confiar en las coordenadas del cliente.
+    lejos = logistica.haversine_km(
+        datos.latitud_entrega, datos.longitud_entrega, *google_maps.CENTRO_ZONA
+    )
+    if lejos > google_maps.RADIO_ZONA_KM:
+        raise HTTPException(
+            status_code=422,
+            detail="La dirección de entrega queda fuera de la zona de servicio (Nicolás Romero).",
+        )
 
     # Si la app manda el mismo producto en dos líneas, se suman.
     cantidades: dict[int, int] = {}
@@ -561,6 +572,118 @@ def ruta_optima(
 
     ruta["sin_coordenadas"] = sin_coordenadas
     return ruta
+
+
+def _km_entrega(p: Pedido) -> float:
+    """Kilómetros en línea recta restaurante -> cliente (0 si faltan coordenadas)."""
+    origen, destino = _coord_restaurante(p.restaurante), _coord_entrega(p)
+    if origen is None or destino is None:
+        return 0.0
+    return logistica.haversine_km(origen[0], origen[1], destino[0], destino[1])
+
+
+def _totales(pedidos: list) -> dict:
+    """Cifras de un periodo: entregas, ganancias (envíos), km y cobros."""
+    ganancias = sum((float(p.costo_envio or 0) for p in pedidos), 0.0)
+    efectivo = sum(
+        (float(p.total or 0) for p in pedidos if p.metodo_pago == MetodoPago.efectivo),
+        0.0,
+    )
+    en_linea = sum(
+        (float(p.total or 0) for p in pedidos if p.metodo_pago != MetodoPago.efectivo),
+        0.0,
+    )
+    return {
+        "entregas": len(pedidos),
+        "ganancias": round(ganancias, 2),
+        "km": round(sum(_km_entrega(p) for p in pedidos), 1),
+        "efectivo": round(efectivo, 2),
+        "mercado_pago": round(en_linea, 2),
+    }
+
+
+@router.get("/repartidor/resumen")
+def resumen_repartidor(
+    zona_min: int = Query(
+        0, ge=-840, le=840,
+        description="Diferencia en minutos entre la hora local y UTC (México: -360).",
+    ),
+    db: Session = Depends(get_db),
+    repartidor: Usuario = Depends(requerir_rol(RolUsuario.repartidor)),
+):
+    """
+    Perfil del repartidor: resumen de hoy / semana / mes, ganancias de los
+    últimos 7 días e historial de entregas. La ganancia es el costo de envío de
+    cada pedido entregado. Las fechas se agrupan con la hora local del repartidor
+    (`zona_min`), porque en la base se guardan en UTC.
+    """
+    pedidos = (
+        db.query(Pedido)
+        .filter(
+            Pedido.repartidor_id == repartidor.id,
+            Pedido.estado == EstadoPedido.entregado,
+        )
+        .order_by(Pedido.fecha_actualizacion.desc(), Pedido.id.desc())
+        .all()
+    )
+
+    desfase = timedelta(minutes=zona_min)
+
+    def local(p: Pedido) -> datetime:
+        return (p.fecha_actualizacion or p.fecha_creacion or datetime.utcnow()) + desfase
+
+    hoy = (datetime.utcnow() + desfase).date()
+    inicio_semana = hoy - timedelta(days=hoy.weekday())  # lunes
+    inicio_mes = hoy.replace(day=1)
+
+    de_hoy = [p for p in pedidos if local(p).date() == hoy]
+    de_semana = [p for p in pedidos if local(p).date() >= inicio_semana]
+    de_mes = [p for p in pedidos if local(p).date() >= inicio_mes]
+
+    dias = []
+    for atras in range(6, -1, -1):
+        dia = hoy - timedelta(days=atras)
+        del_dia = [p for p in pedidos if local(p).date() == dia]
+        dias.append({
+            "fecha": dia.isoformat(),
+            "entregas": len(del_dia),
+            "ganancias": round(sum(float(p.costo_envio or 0) for p in del_dia), 2),
+        })
+
+    historial = [
+        {
+            "id": p.id,
+            "restaurante": p.restaurante.nombre,
+            "direccion_entrega": p.direccion_entrega,
+            "fecha": local(p).isoformat(timespec="minutes"),
+            "costo_envio": float(p.costo_envio or 0),
+            "total": float(p.total or 0),
+            "metodo_pago": p.metodo_pago,
+            "km": round(_km_entrega(p), 1),
+        }
+        for p in pedidos[:100]
+    ]
+
+    ocupado = (
+        db.query(Pedido)
+        .filter(
+            Pedido.repartidor_id == repartidor.id,
+            Pedido.estado.in_(ESTADOS_ACTIVOS),
+        )
+        .count()
+        > 0
+    )
+
+    return {
+        "nombre": repartidor.nombre,
+        "correo": repartidor.correo,
+        "en_entrega": ocupado,
+        "hoy": _totales(de_hoy),
+        "semana": _totales(de_semana),
+        "mes": _totales(de_mes),
+        "dias": dias,
+        "historial": historial,
+    }
 
 
 @router.get("/{pedido_id}", response_model=PedidoOut)

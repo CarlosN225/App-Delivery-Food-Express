@@ -9,7 +9,8 @@ load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "cambia-esta-llave-en-produccion")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+# La sesión se recuerda en la app, así que el token dura 7 días (10080 min).
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

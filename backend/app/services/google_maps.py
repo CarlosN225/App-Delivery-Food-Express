@@ -33,6 +33,7 @@ RADIO_ZONA_KM = 20.0
 SESGO_ZONA = "19.55,-99.40|19.70,-99.22"
 
 _CACHE_GEOCODIFICACION: dict[str, tuple[float, dict]] = {}
+_CACHE_INVERSA: dict[str, tuple[float, str]] = {}
 VIGENCIA_CACHE_SEGUNDOS = 24 * 3600
 
 
@@ -136,6 +137,47 @@ def geocodificar(direccion: str) -> Optional[dict]:
     return resultado
 
 
+def geocodificar_inverso(latitud: float, longitud: float) -> Optional[str]:
+    """
+    Convierte un punto del mapa en una dirección legible (la calle donde el
+    cliente dejó el pin). Devuelve None si Google no encuentra nada.
+    Lanza ErrorGoogleMaps si no hay llave o falla la consulta.
+    """
+    if not hay_llave():
+        raise ErrorGoogleMaps("Falta GOOGLE_MAPS_SERVER_KEY en el .env del backend.")
+
+    clave = f"{latitud:.5f},{longitud:.5f}"
+    en_cache = _CACHE_INVERSA.get(clave)
+    if en_cache and time.time() - en_cache[0] < VIGENCIA_CACHE_SEGUNDOS:
+        return en_cache[1]
+
+    parametros = urllib.parse.urlencode(
+        {
+            "latlng": f"{latitud},{longitud}",
+            "language": "es",
+            "region": "mx",
+            "key": llave_servidor(),
+        }
+    )
+    respuesta = _get_json(f"{GEOCODING_URL}?{parametros}")
+
+    estado = respuesta.get("status")
+    if estado == "ZERO_RESULTS":
+        return None
+    if estado != "OK":
+        raise ErrorGoogleMaps(f"Geocoding respondió con estado {estado}.")
+
+    for resultado in respuesta.get("results", []):
+        # Los "plus codes" (ej. 7G8X+4M) no le sirven a nadie como dirección.
+        if "plus_code" in resultado.get("types", []):
+            continue
+        direccion = (resultado.get("formatted_address") or "").strip()
+        if direccion:
+            _CACHE_INVERSA[clave] = (time.time(), direccion)
+            return direccion
+    return None
+
+
 # --------------------------------------------------------------------------
 # Routes API
 # --------------------------------------------------------------------------
@@ -186,6 +228,9 @@ def calcular_ruta(
         "travelMode": "DRIVE",
         "languageCode": "es-MX",
         "units": "METRIC",
+        # Trazo con todas las curvas de la calle (sin esto sale simplificado
+        # y se ve en tramos rectos).
+        "polylineQuality": "HIGH_QUALITY",
     }
     if intermedios:
         cuerpo["intermediates"] = [_punto(c) for c in intermedios]
@@ -193,7 +238,9 @@ def calcular_ruta(
     cabeceras = {
         "X-Goog-Api-Key": llave_servidor(),
         "X-Goog-FieldMask": (
-            "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"
+            "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,"
+            "routes.legs.distanceMeters,routes.legs.duration,"
+            "routes.legs.polyline.encodedPolyline"
         ),
     }
     respuesta = _post_json(ROUTES_URL, cuerpo, cabeceras)
@@ -205,10 +252,26 @@ def calcular_ruta(
     try:
         puntos = decodificar_polilinea(ruta["polyline"]["encodedPolyline"])
         segundos = int(str(ruta.get("duration", "0s")).rstrip("s").split(".")[0])
+        # Un trazo por tramo (parada a parada), para pintarlos de distinto color.
+        tramos = []
+        for tramo in ruta.get("legs") or []:
+            codificado = (tramo.get("polyline") or {}).get("encodedPolyline")
+            if not codificado:
+                continue
+            tramos.append(
+                {
+                    "distancia_m": int(tramo.get("distanceMeters", 0)),
+                    "duracion_s": int(
+                        str(tramo.get("duration", "0s")).rstrip("s").split(".")[0]
+                    ),
+                    "puntos": decodificar_polilinea(codificado),
+                }
+            )
         return {
             "distancia_m": int(ruta.get("distanceMeters", 0)),
             "duracion_s": segundos,
             "puntos": puntos,
+            "tramos": tramos,
         }
     except (KeyError, ValueError, IndexError):
         raise ErrorGoogleMaps("Respuesta de ruta con formato inesperado.")

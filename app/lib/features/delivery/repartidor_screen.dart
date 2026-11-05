@@ -13,10 +13,12 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../auth/login_screen.dart';
+import '../auth/sesion_service.dart';
 import '../cart/carrito_service.dart';
 import '../maps/mapas_service.dart';
 import 'pedido_model.dart';
 import 'pedido_service.dart';
+import 'perfil_repartidor_screen.dart';
 
 // ---------------------------------------------------------------- estilo
 // Diseño de esquinas rectas: líneas finas, tipografía serif en los títulos
@@ -30,6 +32,10 @@ const _naranjaSuave = Color(0xFFFFF3E0);
 const _rojo = Color(0xFFC8344B);
 const _azul = Color(0xFF1F6FEB);
 const _trazoSecundario = Color(0xFF8DB5B0);
+
+/// Colores de los tramos: tú -> restaurante (azul) y restaurante -> cliente (rojo).
+const _trazoAlRestaurante = _azul;
+const _trazoAlCliente = _rojo;
 
 /// Rótulo pequeño en mayúsculas.
 TextStyle _rotulo({Color color = AppColors.hint, double size = 10.5}) =>
@@ -107,6 +113,11 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   /// Rutas por calles ya pedidas al backend, por "pedido-estado".
   final Map<String, RutaMapa> _rutas = {};
   final Set<String> _pidiendoRuta = {};
+
+  /// Dónde estaba el repartidor cuando se pidió cada ruta (para recalcularla
+  /// cuando se aleja más de [_metrosParaRecalcular]).
+  final Map<String, LatLng?> _origenRuta = {};
+  static const double _metrosParaRecalcular = 200;
 
   /// Pines propios (el mapa web ignora los colores de los pines de Google).
   BitmapDescriptor? _pinRestaurante;
@@ -193,20 +204,45 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   }
 
   /// Pide a Google (vía backend) la ruta por calles de cada pedido en curso.
-  /// Solo una vez por pedido y estado: el backend también la guarda 1 hora.
+  /// Se pide una vez por pedido y estado, y de nuevo cuando el repartidor se
+  /// mueve más de 200 m, para que el trazo salga siempre desde donde está.
   void _pedirRutas() {
+    final yo = _yoPunto;
     for (final p in activos) {
-      final clave = '${p.id}-${p.estado}';
-      if (_rutas.containsKey(clave) || !_pidiendoRuta.add(clave)) continue;
-      MapasService.rutaDePedido(_token, p.id).then((r) {
-        if (!mounted) return;
-        setState(() => _rutas[clave] = r);
-        _ajustarCamara();
-      }).catchError((Object e) {
-        // Sin ruta por calles: el mapa dibuja una línea recta de respaldo.
-        debugPrint('No se pudo obtener la ruta del pedido ${p.id}: $e');
-      }).whenComplete(() => _pidiendoRuta.remove(clave));
+      _pedirRutaDe('${p.id}-${p.estado}', p.id, yo);
     }
+    _pedirRutaDeDisponible();
+  }
+
+  /// Vista previa del recorrido del pedido disponible que se tocó.
+  void _pedirRutaDeDisponible() {
+    final d = _disponibleSel;
+    if (d == null) return;
+    _pedirRutaDe('disp-${d.id}', d.id, _yoPunto);
+  }
+
+  void _pedirRutaDe(String clave, int pedidoId, LatLng? yo) {
+    final yaTiene = _rutas.containsKey(clave);
+    final antes = _origenRuta[clave];
+    final seMovio = yo != null &&
+        (antes == null ||
+            Geolocator.distanceBetween(
+                  yo.latitude,
+                  yo.longitude,
+                  antes.latitude,
+                  antes.longitude,
+                ) >
+                _metrosParaRecalcular);
+    if ((yaTiene && !seMovio) || !_pidiendoRuta.add(clave)) return;
+    MapasService.rutaDePedido(_token, pedidoId, desde: yo).then((r) {
+      if (!mounted) return;
+      _origenRuta[clave] = yo;
+      setState(() => _rutas[clave] = r);
+      _ajustarCamara();
+    }).catchError((Object e) {
+      // Sin ruta por calles: el mapa dibuja una línea recta de respaldo.
+      debugPrint('No se pudo obtener la ruta del pedido $pedidoId: $e');
+    }).whenComplete(() => _pidiendoRuta.remove(clave));
   }
 
   /// Ejecuta una acción sobre un pedido evitando toques repetidos.
@@ -264,6 +300,10 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     try {
       final pos = await _ubicacion();
       if (pos == null) return;
+      if (mounted) {
+        setState(() => posicion = pos);
+        _pedirRutas();
+      }
       for (final pedido in List<Pedido>.from(activos)) {
         await PedidoService.reportarUbicacion(
           _token,
@@ -279,7 +319,16 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     }
   }
 
+  void _abrirPerfil() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PerfilRepartidorScreen(usuario: widget.usuario),
+      ),
+    );
+  }
+
   void _cerrarSesion() {
+    SesionService.borrar();
     CarritoService.instance.vaciar();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -297,6 +346,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   void _seleccionar(int pedidoId) {
     setState(() => _sel = pedidoId);
+    if (_tab == 0) _pedirRutaDeDisponible();
     _colapsarHoja();
     _ajustarCamara();
   }
@@ -598,20 +648,87 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     return marcadores;
   }
 
-  /// Trazo de un pedido en curso: la ruta por calles de Google; si no hay,
-  /// una línea recta repartidor -> (restaurante) -> cliente.
-  List<LatLng> _trazoActivo(Pedido p) {
-    final porCalles = _rutaDe(p);
-    if (porCalles != null && porCalles.puntos.length >= 2) {
-      return porCalles.puntos;
+  /// Tramos de un pedido en curso, cada uno con su color:
+  /// tú -> restaurante (azul) y restaurante -> cliente (rojo). Usa la ruta por
+  /// calles de Google; si no hay, líneas rectas de respaldo.
+  List<({bool alRestaurante, List<LatLng> puntos, bool porCalles})> _tramosDe(
+    Pedido p,
+  ) {
+    final ruta = _rutaDe(p);
+    if (ruta != null && ruta.tramos.isNotEmpty) {
+      return [
+        for (final t in ruta.tramos)
+          if (t.puntos.length >= 2)
+            (
+              alRestaurante: t.haciaRestaurante,
+              puntos: t.puntos,
+              porCalles: ruta.esGoogle,
+            ),
+      ];
     }
     final yo = _yoPunto;
     final r = _punto(p.restauranteLatitud, p.restauranteLongitud);
     final c = _punto(p.latitudEntrega, p.longitudEntrega);
-    return <LatLng>[
-      if (yo != null) yo,
-      if (p.estado == 'aceptado' && r != null) r,
-      if (c != null) c,
+    if (p.estado == 'aceptado' && r != null) {
+      return [
+        if (yo != null)
+          (alRestaurante: true, puntos: [yo, r], porCalles: false),
+        if (c != null) (alRestaurante: false, puntos: [r, c], porCalles: false),
+      ];
+    }
+    return [
+      if (c != null)
+        (
+          alRestaurante: false,
+          puntos: [if (yo != null) yo else if (r != null) r, c],
+          porCalles: false,
+        ),
+    ];
+  }
+
+  /// Todos los puntos del trazo de un pedido en curso (para encuadrar el mapa).
+  List<LatLng> _trazoActivo(Pedido p) => [
+        for (final t in _tramosDe(p)) ...t.puntos,
+      ];
+
+  /// Una línea de color (con borde blanco debajo, si [conBorde]) para que
+  /// resalte sobre las calles. [capa] decide cuál va encima: el tramo de ir al
+  /// restaurante va debajo y más ancho, así, cuando el recorrido de regreso
+  /// pasa por la misma calle, se ven los dos colores.
+  Iterable<Polyline> _trazoConBorde(
+    String id,
+    List<LatLng> puntos,
+    Color color, {
+    double ancho = 6,
+    bool discontinua = false,
+    int capa = 0,
+    bool conBorde = true,
+  }) {
+    return [
+      if (conBorde)
+        Polyline(
+          polylineId: PolylineId('$id-borde'),
+          points: puntos,
+          width: ancho.round() + 4,
+          color: Colors.white,
+          jointType: JointType.round,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          zIndex: capa * 2 + 1,
+        ),
+      Polyline(
+        polylineId: PolylineId(id),
+        points: puntos,
+        width: ancho.round(),
+        color: color,
+        patterns: discontinua
+            ? <PatternItem>[PatternItem.dash(18), PatternItem.gap(10)]
+            : const <PatternItem>[],
+        jointType: JointType.round,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
+        zIndex: capa * 2 + 2,
+      ),
     ];
   }
 
@@ -621,31 +738,49 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     if (_tab == 0) {
       final d = _disponibleSel;
       if (d == null) return trazos;
+      final ruta = _rutas['disp-${d.id}'];
+      if (ruta != null && ruta.tramos.isNotEmpty) {
+        for (var i = 0; i < ruta.tramos.length; i++) {
+          final t = ruta.tramos[i];
+          if (t.puntos.length < 2) continue;
+          trazos.addAll(
+            _trazoConBorde(
+              'prev-${d.id}-$i',
+              t.puntos,
+              t.haciaRestaurante ? _trazoAlRestaurante : _trazoAlCliente,
+              ancho: t.haciaRestaurante ? 10 : 6,
+              capa: t.haciaRestaurante ? 0 : 1,
+              conBorde: t.haciaRestaurante,
+              discontinua: !ruta.esGoogle,
+            ),
+          );
+        }
+        return trazos;
+      }
+      // Respaldo mientras llega la ruta (o si Google no responde).
       final r = _punto(d.restauranteLatitud, d.restauranteLongitud);
       final e = _punto(d.latitudEntrega, d.longitudEntrega);
       final yo = _yoPunto;
       if (yo != null && r != null) {
-        trazos.add(
-          Polyline(
-            polylineId: const PolylineId('hacia-restaurante'),
-            points: [yo, r],
-            width: 6,
-            color: AppColors.primary,
-            jointType: JointType.round,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
+        trazos.addAll(
+          _trazoConBorde(
+            'prev-yo',
+            [yo, r],
+            _trazoAlRestaurante,
+            ancho: 10,
+            discontinua: true,
           ),
         );
       }
       if (r != null && e != null) {
-        trazos.add(
-          Polyline(
-            polylineId: const PolylineId('hacia-cliente'),
-            points: [r, e],
-            width: 4,
-            color: _tinta,
-            patterns: <PatternItem>[PatternItem.dash(18), PatternItem.gap(10)],
-            jointType: JointType.round,
+        trazos.addAll(
+          _trazoConBorde(
+            'prev-ent',
+            [r, e],
+            _trazoAlCliente,
+            capa: 1,
+            conBorde: false,
+            discontinua: true,
           ),
         );
       }
@@ -654,20 +789,25 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
     final elegido = _activoSel;
     for (final p in activos) {
-      final puntos = _trazoActivo(p);
-      if (puntos.length < 2) continue;
       final esElegido = elegido != null && p.id == elegido.id;
-      trazos.add(
-        Polyline(
-          polylineId: PolylineId('ruta-${p.id}'),
-          points: puntos,
-          width: esElegido ? 7 : 4,
-          color: esElegido ? AppColors.primary : _trazoSecundario,
-          jointType: JointType.round,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
-        ),
-      );
+      var i = 0;
+      for (final t in _tramosDe(p)) {
+        if (t.puntos.length < 2) continue;
+        final color = !esElegido
+            ? _trazoSecundario
+            : (t.alRestaurante ? _trazoAlRestaurante : _trazoAlCliente);
+        trazos.addAll(
+          _trazoConBorde(
+            'ruta-${p.id}-${i++}',
+            t.puntos,
+            color,
+            ancho: !esElegido ? 4 : (t.alRestaurante ? 10 : 6),
+            capa: t.alRestaurante ? 0 : 1,
+            conBorde: !esElegido || t.alRestaurante,
+            discontinua: !t.porCalles,
+          ),
+        );
+      }
     }
     return trazos;
   }
@@ -681,6 +821,11 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     if (_tab == 0) {
       final d = _disponibleSel;
       if (d != null) {
+        final ruta = _rutas['disp-${d.id}'];
+        if (ruta != null && ruta.puntos.length >= 2) {
+          puntos.addAll(ruta.puntos);
+          return puntos;
+        }
         final r = _punto(d.restauranteLatitud, d.restauranteLongitud);
         final e = _punto(d.latitudEntrega, d.longitudEntrega);
         if (r != null) puntos.add(r);
@@ -1008,11 +1153,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  IconButton(
-                    tooltip: 'Volver',
-                    icon: const Icon(Icons.arrow_back, color: _tinta),
-                    onPressed: () => Navigator.of(context).maybePop(),
-                  ),
+                  const SizedBox(width: 8),
                   Image.asset(
                     'assets/images/logo-food-express.png',
                     width: angosta ? 110 : 150,
@@ -1078,18 +1219,20 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
       shape: const RoundedRectangleBorder(),
       onSelected: (valor) {
         if (valor == 'actualizar') cargar();
-        if (valor == 'inicio') Navigator.of(context).maybePop();
+        if (valor == 'perfil') _abrirPerfil();
         if (valor == 'salir') _cerrarSesion();
       },
       itemBuilder: (_) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          child: Text(
-            nombre,
-            style: AppTypography.body(weight: FontWeight.w700),
+        const PopupMenuItem<String>(
+          value: 'perfil',
+          child: Row(
+            children: [
+              Icon(Icons.badge_outlined, size: 19),
+              SizedBox(width: 9),
+              Text('Mi perfil'),
+            ],
           ),
         ),
-        const PopupMenuDivider(),
         const PopupMenuItem<String>(
           value: 'actualizar',
           child: Row(
@@ -1097,16 +1240,6 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               Icon(Icons.refresh, size: 19),
               SizedBox(width: 9),
               Text('Actualizar pedidos'),
-            ],
-          ),
-        ),
-        const PopupMenuItem<String>(
-          value: 'inicio',
-          child: Row(
-            children: [
-              Icon(Icons.home_outlined, size: 19),
-              SizedBox(width: 9),
-              Text('Volver al inicio'),
             ],
           ),
         ),
@@ -1574,19 +1707,30 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     );
   }
 
+  static const _ordenEstados = ['aceptado', 'recogido', 'en_camino', 'entregado'];
+  static const _textoAccion = {
+    'recogido': 'Confirmar recogido',
+    'en_camino': 'Iniciar entrega',
+    'entregado': 'Confirmar entrega',
+  };
+
+  /// Estado al que sigue el pedido (null si ya no hay más pasos).
+  String? _siguienteDe(Pedido p) {
+    final indice = _ordenEstados.indexOf(p.estado);
+    return (indice >= 0 && indice < _ordenEstados.length - 1)
+        ? _ordenEstados[indice + 1]
+        : null;
+  }
+
+  /// En pantalla ancha, el avance y el botón de la acción siguiente del
+  /// pedido elegido van sobre el mapa (abajo a la derecha), no en la lista.
+  bool _accionEnMapa(Pedido p) => !_movil && _activoSel?.id == p.id;
+
   Widget _tarjetaActivo(Pedido p) {
     final ocupado = _ocupados.contains(p.id);
     final haciaRestaurante = p.estado == 'aceptado';
-
-    const orden = ['aceptado', 'recogido', 'en_camino', 'entregado'];
-    final indice = orden.indexOf(p.estado);
-    final siguiente =
-        (indice >= 0 && indice < orden.length - 1) ? orden[indice + 1] : null;
-    const textoAccion = {
-      'recogido': 'Confirmar recogido',
-      'en_camino': 'Iniciar entrega',
-      'entregado': 'Confirmar entrega',
-    };
+    final siguiente = _siguienteDe(p);
+    const textoAccion = _textoAccion;
 
     String? detalle(Tramo? t) => t == null
         ? null
@@ -1634,7 +1778,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               padding: const EdgeInsets.all(14),
               decoration: const BoxDecoration(
                 color: _papel,
-                border: Border(left: BorderSide(color: _tinta, width: 3)),
+                border: Border.fromBorderSide(BorderSide(color: _linea)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1660,12 +1804,15 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               ),
             ),
           ],
-          const SizedBox(height: 20),
-          Text('AVANCE DE LA ENTREGA', style: _rotulo()),
-          const SizedBox(height: 10),
-          _ProgresoEntrega(estado: p.estado),
-          // En el celular el botón de la acción siguiente va fijo arriba.
-          if (siguiente != null && !(_movil && _activoSel?.id == p.id)) ...[
+          if (!_accionEnMapa(p)) ...[
+            const SizedBox(height: 20),
+            Text('AVANCE DE LA ENTREGA', style: _rotulo()),
+            const SizedBox(height: 10),
+            _ProgresoEntrega(estado: p.estado),
+          ],
+          // El botón de la acción siguiente del pedido elegido va fijo arriba
+          // (celular) o sobre el mapa (pantalla ancha); aquí solo los demás.
+          if (siguiente != null && _activoSel?.id != p.id) ...[
             const SizedBox(height: 18),
             _Boton(
               texto: textoAccion[siguiente] ?? 'Continuar',
@@ -1742,9 +1889,12 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         ('SELECCIÓN', elegido == null ? '—' : '#${elegido.id}'),
         ('GPS', conGps ? 'Activo' : 'Apagado'),
       ];
+      final previa = elegido == null ? null : _rutas['disp-${elegido.id}'];
       pie = elegido == null
           ? 'TOCA UN PIN PARA VER EL RECORRIDO'
-          : 'TRAZO APROXIMADO · PEDIDO #${elegido.id}';
+          : (previa != null && previa.esGoogle
+              ? 'RUTA POR CALLES · PEDIDO #${elegido.id}'
+              : 'TRAZO APROXIMADO · PEDIDO #${elegido.id}');
     }
 
     return Stack(
@@ -1778,12 +1928,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               padding: EdgeInsets.fromLTRB(14, compacto ? 8 : 10, 16, compacto ? 8 : 10),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                border: Border(
-                  left: BorderSide(color: AppColors.primary, width: 4),
-                  top: BorderSide(color: _linea),
-                  right: BorderSide(color: _linea),
-                  bottom: BorderSide(color: _linea),
-                ),
+                border: Border.fromBorderSide(BorderSide(color: _linea)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1840,122 +1985,197 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                   ),
                 ),
               ),
-              if (!compacto) ...[
-                const SizedBox(height: 10),
-                _leyenda(),
-              ],
             ],
           ),
         ),
         if (compacto)
-          Positioned(left: 10, bottom: 34, child: _leyendaCompacta()),
-        if (!compacto)
           Positioned(
-          left: 16,
-          bottom: 36,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 340),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: _linea),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _FranjaDatos(datos: datos, conBorde: false),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 7,
-                    ),
-                    decoration: const BoxDecoration(
-                      color: _papel,
-                      border: Border(top: BorderSide(color: _linea)),
-                    ),
-                    child: Text(pie, style: _rotulo(size: 9)),
-                  ),
-                ],
+            left: 10,
+            bottom: 34,
+            right: 10,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: _linea),
+                ),
+                child: _leyendaMapa(conPines: false),
               ),
             ),
           ),
-        ),
+        if (!compacto)
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final accion = _tarjetaAccionMapa();
+                // Mapa ancho: datos a la izquierda y acción a la derecha.
+                // Mapa angosto: la acción ocupa el ancho y los datos se ocultan.
+                final lado = c.maxWidth >= 760;
+                return Stack(
+                  children: [
+                    if (accion == null || lado)
+                      Positioned(
+                        left: 16,
+                        bottom: 36,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 340),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              border: Border.all(color: _linea),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _FranjaDatos(datos: datos, conBorde: false),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 7,
+                                  ),
+                                  decoration: const BoxDecoration(
+                                    color: _papel,
+                                    border: Border(
+                                      top: BorderSide(color: _linea),
+                                    ),
+                                  ),
+                                  child: Text(pie, style: _rotulo(size: 9)),
+                                ),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 9,
+                                  ),
+                                  decoration: const BoxDecoration(
+                                    border: Border(
+                                      top: BorderSide(color: _linea),
+                                    ),
+                                  ),
+                                  child: _leyendaMapa(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (accion != null)
+                      Positioned(
+                        right: 72,
+                        bottom: 36,
+                        left: lado ? null : 16,
+                        width: lado ? 320 : null,
+                        child: accion,
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
       ],
     );
   }
 
-  /// Leyenda en una sola fila para el celular.
-  Widget _leyendaCompacta() {
-    Widget punto(Color color, String texto) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(width: 9, height: 9, color: color),
-          const SizedBox(width: 5),
-          Text(texto, style: AppTypography.body(size: 10.5)),
-        ],
-      );
-    }
-
+  /// Pantalla ancha: avance de la entrega y botón de la acción siguiente,
+  /// en una tarjeta abajo a la derecha del mapa.
+  Widget? _tarjetaAccionMapa() {
+    final p = _activoSel;
+    if (_tab != 1 || p == null) return null;
+    final siguiente = _siguienteDe(p);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: _linea),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          punto(_naranja, 'Restaurante'),
-          const SizedBox(width: 10),
-          punto(_rojo, 'Entrega'),
-          const SizedBox(width: 10),
-          punto(_azul, 'Tú'),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 12,
+            offset: Offset(0, 3),
+          ),
         ],
-      ),
-    );
-  }
-
-  Widget _leyenda() {
-    Widget fila(Color color, String texto) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 10, height: 10, color: color),
-            const SizedBox(width: 8),
-            Text(texto, style: AppTypography.body(size: 11.5)),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: _linea),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          fila(_naranja, 'Restaurante'),
-          fila(_rojo, 'Entrega'),
-          fila(_azul, 'Tú'),
+          Text(
+            'PEDIDO #${p.id} · AVANCE DE LA ENTREGA',
+            style: _rotulo(size: 9.5),
+          ),
+          const SizedBox(height: 10),
+          _ProgresoEntrega(estado: p.estado),
+          if (siguiente != null) ...[
+            const SizedBox(height: 14),
+            _Boton(
+              texto: _textoAccion[siguiente] ?? 'Continuar',
+              icono: Icons.arrow_forward,
+              cargando: _ocupados.contains(p.id),
+              onPressed: () => _cambiarEstado(p, siguiente),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// Leyenda del mapa (va abajo, para no estorbar arriba a la derecha):
+  /// los dos tramos del recorrido y los pines.
+  Widget _leyendaMapa({bool conPines = true, bool soloRelevantes = true}) {
+    final activo = _activoSel;
+    final alRestaurante = !soloRelevantes ||
+        _tab == 0 ||
+        (activo != null && activo.estado == 'aceptado');
+    final alCliente = !soloRelevantes || _tab == 0 || activo != null;
+
+    Widget linea(Color color, String texto) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 22, height: 5, color: color),
+          const SizedBox(width: 6),
+          Text(texto, style: AppTypography.body(size: 11)),
+        ],
+      );
+    }
+
+    Widget pin(Color color, String texto) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 9, height: 9, color: color),
+          const SizedBox(width: 5),
+          Text(texto, style: AppTypography.body(size: 11)),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 14,
+      runSpacing: 5,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (alRestaurante) linea(_trazoAlRestaurante, 'Ir por el pedido'),
+        if (alCliente) linea(_trazoAlCliente, 'Entregar al cliente'),
+        if (conPines) ...[
+          pin(_naranja, 'Restaurante'),
+          pin(_rojo, 'Entrega'),
+          pin(_azul, 'Tú'),
+        ],
+      ],
     );
   }
 }
 
 // ======================================================= widgets de apoyo
 
-/// Tarjeta blanca de esquinas rectas. Resalta cuando está elegida o lleva
-/// una barra de color a la izquierda ([acento]).
+/// Tarjeta blanca de esquinas rectas, sin barras de color a un lado. Resalta
+/// con el borde completo cuando está elegida, o con un tinte suave ([acento]).
 class _Caja extends StatelessWidget {
   final Widget child;
   final bool seleccionada;
@@ -1971,27 +2191,22 @@ class _Caja extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final destacada = seleccionada || acento != null;
-    final borde = BorderSide(color: seleccionada ? _tinta : _linea);
+    final borde = BorderSide(
+      color: seleccionada ? _tinta : (acento ?? _linea),
+      width: seleccionada ? 1.6 : 1,
+    );
+    final fondo = acento == null
+        ? Colors.white
+        : Color.alphaBlend(acento!.withAlpha(22), Colors.white);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Material(
-        color: Colors.white,
+        color: fondo,
         child: InkWell(
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: acento ?? (seleccionada ? AppColors.primary : _linea),
-                  width: destacada ? 4 : 1,
-                ),
-                top: borde,
-                right: borde,
-                bottom: borde,
-              ),
-            ),
+            decoration: BoxDecoration(border: Border.fromBorderSide(borde)),
             child: child,
           ),
         ),

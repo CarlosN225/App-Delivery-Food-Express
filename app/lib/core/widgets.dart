@@ -1,14 +1,100 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
-/// Mensaje flotante reutilizable (error en rojo, éxito en verde oscuro).
+OverlayEntry? _avisoActual;
+Timer? _avisoTemporizador;
+
+void _quitarAviso() {
+  _avisoTemporizador?.cancel();
+  _avisoTemporizador = null;
+  try {
+    _avisoActual?.remove();
+  } catch (_) {
+    // Ya se había quitado.
+  }
+  _avisoActual = null;
+}
+
+/// Aviso flotante reutilizable (error en rojo, éxito en verde oscuro).
+/// Sale arriba a la derecha, sobre la barra superior, para no tapar los
+/// botones ni el mapa de abajo. Se quita solo, o al tocarlo.
 void showAppSnackBar(BuildContext context, String message, {bool isError = true}) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: isError ? AppColors.error : AppColors.primaryDark,
-      content: Text(message, style: AppTypography.body(color: Colors.white)),
-    ),
+  final capa = Overlay.maybeOf(context, rootOverlay: true);
+  if (capa == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isError ? AppColors.error : AppColors.primaryDark,
+        content: Text(message, style: AppTypography.body(color: Colors.white)),
+      ),
+    );
+    return;
+  }
+
+  _quitarAviso();
+  final entrada = OverlayEntry(
+    builder: (contexto) {
+      final medidas = MediaQuery.of(contexto);
+      final ancho = medidas.size.width - 32;
+      return Positioned(
+        top: medidas.padding.top + 12,
+        right: 16,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: ancho < 380 ? ancho : 380),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 180),
+            builder: (_, valor, hijo) => Opacity(
+              opacity: valor,
+              child: Transform.translate(
+                offset: Offset(0, (1 - valor) * -8),
+                child: hijo,
+              ),
+            ),
+            child: Material(
+              color: isError ? AppColors.error : AppColors.primaryDark,
+              elevation: 6,
+              child: InkWell(
+                onTap: _quitarAviso,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isError
+                            ? Icons.error_outline
+                            : Icons.check_circle_outline,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          message,
+                          style: AppTypography.body(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+  _avisoActual = entrada;
+  capa.insert(entrada);
+  _avisoTemporizador = Timer(
+    Duration(seconds: isError ? 4 : 3),
+    _quitarAviso,
   );
 }
 
@@ -72,6 +158,8 @@ class AppTextField extends StatelessWidget {
   final TextInputType keyboardType;
   final String? Function(String?)? validator;
   final Widget? suffix;
+  final ValueChanged<String>? onSubmitted;
+  final TextInputAction? textInputAction;
 
   const AppTextField({
     super.key,
@@ -82,6 +170,8 @@ class AppTextField extends StatelessWidget {
     this.keyboardType = TextInputType.text,
     this.validator,
     this.suffix,
+    this.onSubmitted,
+    this.textInputAction,
   });
 
   static OutlineInputBorder _border(Color color, {double width = 1.5}) {
@@ -98,6 +188,8 @@ class AppTextField extends StatelessWidget {
       obscureText: obscure,
       keyboardType: keyboardType,
       validator: validator,
+      onFieldSubmitted: onSubmitted,
+      textInputAction: textInputAction,
       style: AppTypography.body(),
       decoration: InputDecoration(
         hintText: hint,

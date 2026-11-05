@@ -2,8 +2,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/widgets.dart';
-import '../home/home_screen.dart';
 import 'auth_service.dart';
+import 'puerta_sesion.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -54,7 +54,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => HomeScreen(usuario: usuario),
+          // El repartidor entra a su panel de entregas; el cliente (y el
+          // administrador) al inicio con los restaurantes.
+          builder: (_) => pantallaInicialPara(usuario),
         ),
       );
     } on AuthException catch (e) {
