@@ -1,4 +1,6 @@
+import unicodedata
 from math import radians, sin, cos, sqrt, atan2
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -6,12 +8,19 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.restaurante import Restaurante
 from app.schemas.restaurante import RestauranteCercano
+from app.services.seguridad import sanitizar_busqueda
 
 
 router = APIRouter(
     prefix="/restaurantes",
     tags=["Restaurantes"],
 )
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas y sin acentos, para comparar 'Cafetería' con 'cafeteria'."""
+    sin_acentos = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in sin_acentos if unicodedata.category(c) != "Mn")
 
 
 def calcular_distancia(
@@ -63,12 +72,20 @@ def obtener_restaurantes_cercanos(
         10.0,
         description="Radio máximo de búsqueda en kilómetros",
     ),
+    q: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Búsqueda opcional por nombre o categoría (se sanitiza).",
+    ),
     db: Session = Depends(get_db),
 ):
     """
     Devuelve los restaurantes que se encuentran dentro
     del radio indicado, ordenados del más cercano al más lejano.
     """
+
+    # Codificación segura: la búsqueda se limpia con Regex antes de usarse.
+    termino = _normalizar(sanitizar_busqueda(q))
 
     restaurantes = db.query(Restaurante).all()
 
@@ -93,6 +110,11 @@ def obtener_restaurantes_cercanos(
             latitud_restaurante,
             longitud_restaurante,
         )
+
+        if termino and termino not in _normalizar(
+            f"{restaurante.nombre} {restaurante.categoria or ''}"
+        ):
+            continue
 
         if distancia <= radio_km:
             restaurantes_cercanos.append(

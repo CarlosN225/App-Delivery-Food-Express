@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/seguridad/sanitizador.dart';
 import '../../core/format.dart';
 import '../../core/location_service.dart';
 import '../admin/admin_screen.dart';
@@ -1187,8 +1188,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buscador() {
     return TextField(
       controller: _busquedaController,
+      // Codificación segura: se bloquean caracteres peligrosos al escribir y
+      // el texto se sanitiza con Regex antes de filtrar (Actividad 2).
+      inputFormatters: Sanitizador.formateadoresBusqueda,
       onChanged: (valor) {
-        setState(() => busqueda = valor);
+        setState(() => busqueda = Sanitizador.busqueda(valor));
       },
       style: const TextStyle(
         fontSize: 16,

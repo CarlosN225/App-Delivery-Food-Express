@@ -10,9 +10,14 @@ import 'package:http/http.dart' as http;
 ///  - Simulador de iOS:                                     http://127.0.0.1:8000
 ///  - Dispositivo físico (celular real):                    http://<IP-de-tu-compu>:8000
 ///
-/// Cambia el valor de abajo según en dónde vayas a probar.
+/// Se puede cambiar SIN editar el código, al compilar:
+///   flutter run -d chrome --web-port 5050                         (usa 127.0.0.1)
+///   flutter build apk --dart-define=API_URL=http://192.168.1.50:8000
 class ApiConfig {
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const String baseUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: 'http://127.0.0.1:8000',
+  );
 }
 
 /// Error de la API o de conexión, con un mensaje listo para mostrar al usuario.
