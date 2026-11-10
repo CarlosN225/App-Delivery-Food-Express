@@ -5,6 +5,7 @@ from app.database import Base, engine
 from app import models
 from app.migraciones import aplicar_migraciones
 from app.routers import auth, restaurantes, productos, pedidos, pagos, notificaciones, admin, mapas
+from app.services.seguridad import instalar_filtro_pii
 
 
 # Crea las tablas automáticamente si no existen y agrega a `pedidos` las
@@ -12,6 +13,9 @@ from app.routers import auth, restaurantes, productos, pedidos, pagos, notificac
 # (suficiente para desarrollo; para producción se recomienda Alembic).
 Base.metadata.create_all(bind=engine)
 aplicar_migraciones(engine)
+
+# Los logs nunca muestran teléfonos ni correos completos (Actividad 2).
+instalar_filtro_pii()
 
 app = FastAPI(
     title="Food Express API",

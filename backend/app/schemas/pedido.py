@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.pedido import EstadoPedido, EstadoPago, MetodoPago
+from app.services.seguridad import sanitizar_texto
 
 
 class ItemCrear(BaseModel):
@@ -23,6 +24,15 @@ class CotizacionIn(BaseModel):
 class PedidoCrear(CotizacionIn):
     direccion_entrega: str = Field(min_length=3, max_length=255)
     metodo_pago: MetodoPago
+
+    @field_validator("direccion_entrega")
+    @classmethod
+    def _limpiar_direccion(cls, valor: str) -> str:
+        # Codificación segura: se quitan etiquetas HTML y símbolos de marcado.
+        limpio = sanitizar_texto(valor) or ""
+        if len(limpio) < 3:
+            raise ValueError("La dirección de entrega no es válida.")
+        return limpio
 
 
 class CotizacionOut(BaseModel):

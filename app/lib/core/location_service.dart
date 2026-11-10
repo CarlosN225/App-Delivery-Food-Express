@@ -1,36 +1,20 @@
 import 'package:geolocator/geolocator.dart';
 
+import 'seguridad/permisos_service.dart';
+import 'seguridad/registro.dart';
+
 class LocationService {
-  // Obtiene la ubicación actual del dispositivo
+  // Obtiene la ubicación actual del dispositivo. Antes de leer el GPS se
+  // valida el permiso (Actividad 3: validación de permisos críticos).
   static Future<Position?> obtenerUbicacionActual() async {
-    // 1. Comprobar si el GPS/servicio de ubicación está activo
-    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+    final estado = await PermisosService.ubicacion();
 
-    if (!servicioActivo) {
-      print('El servicio de ubicación está desactivado.');
+    if (estado != EstadoPermiso.concedido) {
+      Registro.aviso(PermisosService.mensaje(estado));
       return null;
     }
 
-    // 2. Comprobar el permiso de ubicación
-    LocationPermission permiso = await Geolocator.checkPermission();
-
-    // 3. Si no hay permiso, solicitarlo
-    if (permiso == LocationPermission.denied) {
-      permiso = await Geolocator.requestPermission();
-
-      if (permiso == LocationPermission.denied) {
-        print('El usuario rechazó el permiso de ubicación.');
-        return null;
-      }
-    }
-
-    // 4. Si el permiso fue rechazado permanentemente
-    if (permiso == LocationPermission.deniedForever) {
-      print('El permiso de ubicación fue rechazado permanentemente.');
-      return null;
-    }
-
-    // 5. Obtener la ubicación actual
+    // Con el permiso concedido, se obtiene la ubicación actual.
     Position posicion = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
