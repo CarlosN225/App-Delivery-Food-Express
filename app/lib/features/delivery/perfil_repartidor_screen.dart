@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../auth/auth_service.dart';
+import '../resenas/estrellas.dart';
 
 // ---------------------------------------------------------------- estilo
 // Mismo lenguaje que el panel del repartidor: esquinas rectas, líneas
@@ -112,6 +113,8 @@ class _Entrega {
 
 class _Resumen {
   final bool enEntrega;
+  final double? calificacion; // promedio de las reseñas que recibió
+  final int totalResenas;
   final _Cifras hoy;
   final _Cifras semana;
   final _Cifras mes;
@@ -120,6 +123,8 @@ class _Resumen {
 
   const _Resumen({
     required this.enEntrega,
+    this.calificacion,
+    this.totalResenas = 0,
     required this.hoy,
     required this.semana,
     required this.mes,
@@ -129,6 +134,13 @@ class _Resumen {
 
   factory _Resumen.fromJson(Map<String, dynamic> j) => _Resumen(
         enEntrega: j['en_entrega'] == true,
+        calificacion:
+            ((j['calificacion'] as Map<String, dynamic>?)?['promedio'] as num?)
+                ?.toDouble(),
+        totalResenas:
+            ((j['calificacion'] as Map<String, dynamic>?)?['total'] as num?)
+                    ?.toInt() ??
+                0,
         hoy: _Cifras.fromJson(j['hoy'] as Map<String, dynamic>),
         semana: _Cifras.fromJson(j['semana'] as Map<String, dynamic>),
         mes: _Cifras.fromJson(j['mes'] as Map<String, dynamic>),
@@ -503,6 +515,12 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTypography.body(color: AppColors.hint, size: 12),
+              ),
+              const SizedBox(height: 2),
+              ResumenCalificacion(
+                promedio: _datos?.calificacion,
+                total: _datos?.totalResenas ?? 0,
+                tamano: 12,
               ),
             ],
           ),

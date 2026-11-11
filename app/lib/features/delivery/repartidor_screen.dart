@@ -1486,9 +1486,42 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     ];
   }
 
-  /// Aviso: mientras haya un pedido en curso no se puede aceptar otro.
+  // Entregas simultáneas (Sprint 5): hasta 2 pedidos a la vez, con restaurantes
+  // a menos de 3 km entre sí. El backend valida las mismas reglas.
+  static const int _maxPedidos = 2;
+  static const double _maxKmEntreRestaurantes = 3.0;
+
+  /// Por qué no se puede aceptar este pedido ahora (null = sí se puede).
+  String? _motivoBloqueo(PedidoDisponible p) {
+    if (activos.length >= _maxPedidos) {
+      return 'Ya llevas $_maxPedidos pedidos. Entrega uno antes de aceptar otro.';
+    }
+    for (final a in activos) {
+      if (a.estado == 'en_camino') {
+        return 'Vas en camino a entregar el pedido #${a.id}. Termínalo primero.';
+      }
+    }
+    final lat = p.restauranteLatitud;
+    final lon = p.restauranteLongitud;
+    if (lat == null || lon == null) return null;
+    for (final a in activos) {
+      final aLat = a.restauranteLatitud;
+      final aLon = a.restauranteLongitud;
+      if (aLat == null || aLon == null) continue;
+      final km = Geolocator.distanceBetween(aLat, aLon, lat, lon) / 1000;
+      if (km > _maxKmEntreRestaurantes) {
+        return 'Queda a ${km.toStringAsFixed(1)} km del pedido #${a.id} '
+            '(máximo ${_maxKmEntreRestaurantes.toStringAsFixed(0)} km).';
+      }
+    }
+    return null;
+  }
+
+  /// Aviso de pedidos en curso: cuántos lleva y si todavía puede tomar otro.
   Widget _avisoEnCurso() {
-    final p = activos.first;
+    final llenos = activos.length >= _maxPedidos;
+    final enCamino = activos.any((a) => a.estado == 'en_camino');
+    final ids = activos.map((a) => '#${a.id}').join(' y ');
     return _Caja(
       acento: _naranja,
       child: Row(
@@ -1500,11 +1533,19 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 Text('AVISO', style: _rotulo(color: _naranja)),
                 const SizedBox(height: 4),
                 Text(
-                  'Tienes un pedido en curso',
+                  llenos
+                      ? 'Llevas $_maxPedidos pedidos en curso'
+                      : 'Tienes un pedido en curso',
                   style: AppTypography.body(weight: FontWeight.w700, size: 15),
                 ),
                 Text(
-                  'Entrega el pedido #${p.id} antes de aceptar otro.',
+                  llenos
+                      ? 'Entrega uno de los pedidos $ids antes de aceptar otro.'
+                      : enCamino
+                          ? 'Termina la entrega del pedido $ids para poder aceptar otro.'
+                          : 'Puedes tomar un segundo pedido si su restaurante queda a '
+                          'menos de ${_maxKmEntreRestaurantes.toStringAsFixed(0)} km '
+                          'del pedido $ids.',
                   style: AppTypography.body(color: AppColors.hint, size: 12.5),
                 ),
               ],
@@ -1517,7 +1558,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               foregroundColor: _tinta,
               shape: const RoundedRectangleBorder(),
             ),
-            child: Text('VER PEDIDO', style: _rotulo(color: _tinta, size: 11)),
+            child: Text('VER RUTA', style: _rotulo(color: _tinta, size: 11)),
           ),
         ],
       ),
@@ -1526,8 +1567,9 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   Widget _tarjetaDisponible(PedidoDisponible p) {
     final ocupado = _ocupados.contains(p.id);
-    // Un repartidor atiende un pedido a la vez.
-    final bloqueado = activos.isNotEmpty;
+    // Hasta 2 pedidos a la vez (ver _motivoBloqueo).
+    final motivo = _motivoBloqueo(p);
+    final bloqueado = motivo != null;
 
     String km(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)} km';
 
@@ -1577,6 +1619,13 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               ),
             ],
           ),
+          if (motivo != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              motivo,
+              style: AppTypography.body(color: _naranja, size: 12.5),
+            ),
+          ],
           const SizedBox(height: 18),
           Row(
             children: [

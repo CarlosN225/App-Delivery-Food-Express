@@ -33,6 +33,7 @@ from app.models.producto import Producto
 from app.models.restaurante import Restaurante
 from app.models.usuario import RolUsuario, Usuario
 from app.routers.auth import obtener_usuario_actual, requerir_rol
+from app.routers.resenas import promedio_de_repartidor
 from app.schemas.pedido import (
     CambioEstado,
     CotizacionIn,
@@ -52,9 +53,11 @@ CENTAVO = Decimal("0.01")
 # Estados en los que un pedido ya tiene repartidor y sigue en curso.
 ESTADOS_ACTIVOS = (EstadoPedido.aceptado, EstadoPedido.recogido, EstadoPedido.en_camino)
 
-# Un repartidor atiende un pedido a la vez: primero lo entrega y luego toma otro.
-# (Subir este número permite llevar varios a la vez y usar la ruta óptima #11.)
-MAX_PEDIDOS_EN_CURSO = 1
+# Entregas simultáneas (Sprint 5): un repartidor puede llevar hasta 2 pedidos a
+# la vez, con la ruta óptima (#11) para ordenar las paradas. El segundo pedido
+# solo se puede tomar si su restaurante queda cerca del primero.
+MAX_PEDIDOS_EN_CURSO = 2
+MAX_KM_ENTRE_RESTAURANTES = 3.0
 
 # Transiciones permitidas para el repartidor (historia #12).
 TRANSICIONES = {
@@ -413,8 +416,15 @@ def aceptar_pedido(
     if en_curso >= MAX_PEDIDOS_EN_CURSO:
         raise HTTPException(
             status_code=409,
-            detail="Ya tienes un pedido en curso. Entrégalo antes de aceptar otro.",
+            detail=(
+                f"Ya llevas {MAX_PEDIDOS_EN_CURSO} pedidos en curso. "
+                "Entrega uno antes de aceptar otro."
+                if MAX_PEDIDOS_EN_CURSO > 1
+                else "Ya tienes un pedido en curso. Entrégalo antes de aceptar otro."
+            ),
         )
+    if en_curso > 0:
+        _validar_segundo_pedido(db, repartidor, pedido)
 
     # UPDATE condicionado: si dos repartidores aceptan a la vez, solo uno gana.
     filas = (
@@ -438,6 +448,50 @@ def aceptar_pedido(
     return {
         "mensaje": "Pedido aceptado correctamente.",
     }
+
+
+def _validar_segundo_pedido(db: Session, repartidor: Usuario, nuevo: Pedido) -> None:
+    """
+    Reglas para llevar varios pedidos a la vez:
+      * si ya va en camino a entregar uno, termina esa entrega primero;
+      * el restaurante del nuevo pedido debe estar a menos de
+        MAX_KM_ENTRE_RESTAURANTES km de los restaurantes de los que ya lleva.
+    """
+    activos = (
+        db.query(Pedido)
+        .filter(
+            Pedido.repartidor_id == repartidor.id,
+            Pedido.estado.in_(ESTADOS_ACTIVOS),
+        )
+        .all()
+    )
+    for activo in activos:
+        if activo.estado == EstadoPedido.en_camino:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Ya vas en camino a entregar el pedido #{activo.id}. "
+                    "Termínalo antes de aceptar otro."
+                ),
+            )
+
+    destino = _coord_restaurante(nuevo.restaurante)
+    if destino is None:
+        return  # sin coordenadas no se puede medir; se permite
+    for activo in activos:
+        origen = _coord_restaurante(activo.restaurante)
+        if origen is None:
+            continue
+        km = logistica.haversine_km(*origen, *destino)
+        if km > MAX_KM_ENTRE_RESTAURANTES:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Este restaurante queda a {km:.1f} km del pedido #{activo.id}. "
+                    f"Para llevar dos pedidos, deben estar a menos de "
+                    f"{MAX_KM_ENTRE_RESTAURANTES:g} km."
+                ),
+            )
 
 
 @router.put("/{pedido_id}/rechazar")
@@ -674,10 +728,13 @@ def resumen_repartidor(
         > 0
     )
 
+    promedio, total_resenas = promedio_de_repartidor(db, repartidor.id)
+
     return {
         "nombre": repartidor.nombre,
         "correo": repartidor.correo,
         "en_entrega": ocupado,
+        "calificacion": {"promedio": promedio, "total": total_resenas},
         "hoy": _totales(de_hoy),
         "semana": _totales(de_semana),
         "mes": _totales(de_mes),
