@@ -20,6 +20,11 @@ class FoodExpressApp extends StatelessWidget {
       title: 'Food Express',
       debugShowCheckedModeBanner: false,
       theme: buildFoodExpressTheme(),
+      // Android 15 dibuja la app debajo de la barra de estado y la de
+      // navegación; SafeArea la mantiene entre las dos. En web no cambia nada.
+      builder: (context, child) => SafeArea(
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: const PuertaSesion(),
     );
   }

@@ -6,6 +6,7 @@ import '../../core/format.dart';
 import '../../core/imagenes.dart';
 import '../../core/location_service.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
@@ -280,42 +281,7 @@ class _CarritoScreenState extends State<CarritoScreen> {
   // =====================================================
 
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: grisBorde),
-              ),
-              child: const Icon(Icons.arrow_back, color: verdeOscuro),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text('Mi carrito', style: AppTypography.title(size: 20)),
-          ),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
-    );
+    return BarraSuperiorFE(titulo: 'Mi carrito', margen: margen);
   }
 
   // =====================================================

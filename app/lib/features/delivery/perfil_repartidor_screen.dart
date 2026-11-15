@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart' show LogoFE, alturaBarraFE, anchoLogoBarra;
 import '../auth/auth_service.dart';
 import '../resenas/estrellas.dart';
 
@@ -289,7 +290,6 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
   }
 
   Widget _barra() {
-    final angosta = MediaQuery.of(context).size.width < 600;
     return Material(
       color: Colors.white,
       child: Container(
@@ -299,7 +299,7 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
         child: SafeArea(
           bottom: false,
           child: SizedBox(
-            height: 64,
+            height: alturaBarraFE(context),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -309,12 +309,7 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
                     icon: const Icon(Icons.arrow_back, color: _tinta),
                     onPressed: () => Navigator.of(context).maybePop(),
                   ),
-                  Image.asset(
-                    'assets/images/logo-food-express.png',
-                    width: angosta ? 110 : 150,
-                    height: 46,
-                    fit: BoxFit.contain,
-                  ),
+                  LogoFE(ancho: anchoLogoBarra(context)),
                   const SizedBox(width: 14),
                   Container(
                     padding:

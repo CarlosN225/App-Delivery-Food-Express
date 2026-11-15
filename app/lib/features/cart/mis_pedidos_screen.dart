@@ -319,51 +319,13 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
   // BARRA SUPERIOR
   // =====================================================
 
-  Widget _botonBarra(IconData icono, String tooltip, VoidCallback onTap) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: grisBorde),
-          ),
-          child: Icon(icono, color: verdeOscuro),
-        ),
-      ),
-    );
-  }
-
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          _botonBarra(Icons.arrow_back, 'Regresar', () => Navigator.pop(context)),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text('Mis pedidos', style: AppTypography.title(size: 20)),
-          ),
-          _botonBarra(Icons.refresh, 'Actualizar', _cargar),
-          const SizedBox(width: 14),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+    return BarraSuperiorFE(
+      titulo: 'Mis pedidos',
+      margen: margen,
+      acciones: [
+        BotonBarraFE(icono: Icons.refresh, tooltip: 'Actualizar', onTap: _cargar),
+      ],
     );
   }
 

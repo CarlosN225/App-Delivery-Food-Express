@@ -1,3 +1,12 @@
+import java.util.Properties
+
+// Llave de Google Maps para Android. NO va en el repositorio: se lee de
+// ~/.gradle/gradle.properties (MAPS_API_KEY=...) o de android/local.properties.
+val propiedadesLocales = Properties().apply {
+    val archivo = rootProject.file("local.properties")
+    if (archivo.exists()) archivo.inputStream().use { load(it) }
+}
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -27,6 +36,9 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["MAPS_API_KEY"] =
+            (project.findProperty("MAPS_API_KEY") as String?)
+                ?: propiedadesLocales.getProperty("MAPS_API_KEY", "")
     }
 
     buildTypes {

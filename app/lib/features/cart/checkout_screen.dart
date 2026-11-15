@@ -174,6 +174,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
     _centrarMapa();
     _recotizar();
+    // Igual que al mover el pin: escribe en la caja la calle y número
+    // que corresponden al GPS, para que texto y mapa coincidan.
+    _direccionDelPin(LatLng(widget.latitud, widget.longitud), desdeGps: true);
   }
 
   /// El cliente arrastró el pin hasta su puerta.
@@ -191,7 +194,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   /// Pregunta a Google qué calle es el punto donde quedó el pin y actualiza
   /// el texto de la dirección para que coincida con el mapa.
-  Future<void> _direccionDelPin(LatLng punto) async {
+  Future<void> _direccionDelPin(LatLng punto, {bool desdeGps = false}) async {
     try {
       final direccion = await MapasService.direccionDe(
         widget.usuario.token,
@@ -211,7 +214,21 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       });
     } catch (_) {
       if (!mounted || _punto != punto) return;
-      setState(() => _direccionGoogle = 'Ubicación ajustada en el mapa');
+      // Sin respuesta de Google: que la caja nunca quede vacía, porque el
+      // pedido viaja con ese texto. Se deja un texto básico que ya se puede
+      // editar o completar con la referencia.
+      if (_direccionController.text.trim().isEmpty) {
+        const respaldo = 'Mi ubicación actual (GPS)';
+        _ajustandoTexto = true;
+        _direccionController.text = respaldo;
+        _ajustandoTexto = false;
+        _textoValidado = respaldo;
+      }
+      setState(() {
+        _direccionGoogle = desdeGps
+            ? 'Tu ubicación actual (GPS)'
+            : 'Ubicación ajustada en el mapa';
+      });
     }
   }
 
@@ -408,7 +425,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         child: SafeArea(
           bottom: false,
           child: SizedBox(
-            height: 56,
+            height: alturaBarraFE(context),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -497,7 +514,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ),
                   ),
                   const SizedBox(width: 22),
-                  const _LogoFE(ancho: 92),
+                  LogoFE(ancho: anchoLogoBarra(context)),
                 ],
               ),
             ),
@@ -1416,46 +1433,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         const SizedBox(height: 8),
         _selectorPago(compacto: false),
       ],
-    );
-  }
-}
-
-/// Logo de Food Express recortado a su parte visible. El PNG trae mucho
-/// margen transparente; así queda del tamaño y la posición correctos.
-class _LogoFE extends StatelessWidget {
-  final double ancho;
-
-  const _LogoFE({required this.ancho});
-
-  @override
-  Widget build(BuildContext context) {
-    const anchoPng = 1672.0;
-    const altoPng = 941.0;
-    const margenIzq = 123.0;
-    const margenSup = 200.0;
-    const anchoVisible = 1471.0;
-    const altoVisible = 524.0;
-
-    final escala = ancho / anchoVisible;
-
-    return SizedBox(
-      width: ancho,
-      height: altoVisible * escala,
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
-        children: [
-          Positioned(
-            left: -margenIzq * escala,
-            top: -margenSup * escala,
-            width: anchoPng * escala,
-            height: altoPng * escala,
-            child: Image.asset(
-              'assets/images/logo-food-express.png',
-              fit: BoxFit.fill,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -193,76 +193,20 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   // =====================================================
 
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: grisBorde),
-              ),
-              child: const Icon(Icons.arrow_back, color: verdeOscuro),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text('Notificaciones', style: AppTypography.title(size: 20)),
-          ),
-          Tooltip(
-            message: 'Actualizar',
-            child: InkWell(
-              onTap: _cargar,
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border.all(color: grisBorde),
-                ),
-                child: const Icon(Icons.refresh, color: verdeOscuro),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Tooltip(
-            message: 'Marcar todas como leídas',
-            child: InkWell(
-              onTap: _sinLeer == 0 ? null : _marcarTodas,
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border.all(color: grisBorde),
-                ),
-                child: Icon(
-                  Icons.done_all,
-                  color: _sinLeer == 0 ? grisBorde : verdeOscuro,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+    final angosta = MediaQuery.of(context).size.width < 600;
+    return BarraSuperiorFE(
+      titulo: 'Notificaciones',
+      margen: margen,
+      acciones: [
+        // La bandeja se actualiza sola; en celular se quita para dar espacio.
+        if (!angosta)
+          BotonBarraFE(icono: Icons.refresh, tooltip: 'Actualizar', onTap: _cargar),
+        BotonBarraFE(
+          icono: Icons.done_all,
+          tooltip: 'Marcar todas como leídas',
+          onTap: _sinLeer == 0 ? null : _marcarTodas,
+        ),
+      ],
     );
   }
 

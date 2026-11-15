@@ -9,13 +9,16 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/location_service.dart';
+import '../../core/seguridad/entorno.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../auth/login_screen.dart';
 import '../auth/sesion_service.dart';
 import '../cart/carrito_service.dart';
+import '../maps/icono_moto.dart';
 import '../maps/mapas_service.dart';
+import '../maps/recorrido_simulado.dart';
 import 'pedido_model.dart';
 import 'pedido_service.dart';
 import 'perfil_repartidor_screen.dart';
@@ -119,6 +122,22 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   final Map<String, LatLng?> _origenRuta = {};
   static const double _metrosParaRecalcular = 200;
 
+  // ---- demostración: simula el trayecto sobre la ruta por calles
+  Timer? _simulacion;
+  RecorridoSimulado? _recorrido;
+  double _avanceM = 0;
+  LatLng? _posSimulada;
+  bool _enviandoSimulada = false;
+  int _factorVelocidad = 2;
+  static const double _metrosPorSegundoBase = 12;
+  static const Duration _pasoSimulacion = Duration(milliseconds: 500);
+
+  bool get _simulando => _simulacion != null;
+
+  /// Solo en modo debug o canal interno/privado; el canal público la oculta.
+  bool get _demoDisponible =>
+      Entorno.permiteHerramientasDemo(Entorno.canal);
+
   /// Pines propios (el mapa web ignora los colores de los pines de Google).
   BitmapDescriptor? _pinRestaurante;
   BitmapDescriptor? _pinEntrega;
@@ -129,9 +148,10 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     super.initState();
     _crearPines();
     cargar();
-    // Historia #14: con pedidos en curso, manda la posición cada 10 s.
+    // Historia #14: con pedidos en curso, manda la posición cada 3 s para que
+    // el cliente vea la moto avanzar casi en tiempo real.
     _gps = Timer.periodic(
-      const Duration(seconds: 10),
+      const Duration(seconds: 3),
       (_) => _reportarUbicacion(),
     );
   }
@@ -139,6 +159,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   @override
   void dispose() {
     _gps?.cancel();
+    _simulacion?.cancel();
     _mapa?.dispose();
     _hoja.dispose();
     super.dispose();
@@ -185,7 +206,10 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         ruta = nuevaRuta;
         cargando = false;
         error = null;
+        // Sin pedidos en curso se termina la demostración y vuelve el GPS real.
+        if (nuevosActivos.isEmpty) _posSimulada = null;
       });
+      if (nuevosActivos.isEmpty) _detenerSimulacion();
       _pedirRutas();
       _ajustarCamaraConEspera();
     } on ApiException catch (e) {
@@ -224,7 +248,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   void _pedirRutaDe(String clave, int pedidoId, LatLng? yo) {
     final yaTiene = _rutas.containsKey(clave);
     final antes = _origenRuta[clave];
-    final seMovio = yo != null &&
+    final seMovio = !_simulando &&
+        yo != null &&
         (antes == null ||
             Geolocator.distanceBetween(
                   yo.latitude,
@@ -277,6 +302,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   /// Avanza el pedido al siguiente estado (Recogido, En camino, Entregado).
   Future<void> _cambiarEstado(Pedido p, String nuevo) async {
+    _detenerSimulacion();
     await _accion(
       p.id,
       () async {
@@ -296,6 +322,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   /// Historia #14: manda la posición del repartidor para el rastreo del cliente.
   Future<void> _reportarUbicacion() async {
     if (_reportando || activos.isEmpty) return;
+    // Con la demostración activa, la posición la manda el simulador.
+    if (_posSimulada != null) return;
     _reportando = true;
     try {
       final pos = await _ubicacion();
@@ -304,19 +332,108 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         setState(() => posicion = pos);
         _pedirRutas();
       }
-      for (final pedido in List<Pedido>.from(activos)) {
-        await PedidoService.reportarUbicacion(
-          _token,
-          pedido.id,
-          pos.latitude,
-          pos.longitude,
-        );
-      }
+      await _enviarPosicion(pos.latitude, pos.longitude);
     } catch (_) {
       // Sin red o sin GPS: se reintenta en el siguiente ciclo.
     } finally {
       _reportando = false;
     }
+  }
+
+  /// Manda una posición a todos los pedidos en curso (el cliente la ve en su
+  /// rastreo).
+  Future<void> _enviarPosicion(double latitud, double longitud) async {
+    for (final pedido in List<Pedido>.from(activos)) {
+      await PedidoService.reportarUbicacion(
+        _token,
+        pedido.id,
+        latitud,
+        longitud,
+      );
+    }
+  }
+
+  // ------------------------------------------------------- demostración
+
+  /// Trazo que se recorre en la demostración: antes de recoger, el tramo hacia
+  /// el restaurante; después, el tramo hacia el cliente.
+  List<LatLng> _caminoDeDemo(Pedido p) {
+    final puntos = <LatLng>[];
+    for (final t in _tramosDe(p)) {
+      if (p.estado == 'aceptado' && !t.alRestaurante) continue;
+      for (final punto in t.puntos) {
+        if (puntos.isEmpty || puntos.last != punto) puntos.add(punto);
+      }
+    }
+    return puntos;
+  }
+
+  void _iniciarSimulacion(Pedido p) {
+    final camino = _caminoDeDemo(p);
+    if (camino.length < 2) {
+      showAppSnackBar(context, 'Aún no hay una ruta para simular. Espera un momento.');
+      return;
+    }
+    _simulacion?.cancel();
+    _recorrido = RecorridoSimulado(camino);
+    _avanceM = 0;
+    setState(() => _posSimulada = camino.first);
+    _simulacion = Timer.periodic(_pasoSimulacion, (_) => _pasoDeSimulacion());
+    _enviarPosicionSimulada(camino.first);
+    setState(() {});
+  }
+
+  void _pasoDeSimulacion() {
+    final recorrido = _recorrido;
+    if (recorrido == null || !mounted) {
+      _detenerSimulacion();
+      return;
+    }
+    _avanceM += _metrosPorSegundoBase *
+        _factorVelocidad *
+        (_pasoSimulacion.inMilliseconds / 1000);
+    final llego = _avanceM >= recorrido.longitudM;
+    final punto = recorrido.posicionEn(_avanceM);
+
+    setState(() => _posSimulada = punto);
+    _mapa?.animateCamera(CameraUpdate.newLatLng(punto));
+    _enviarPosicionSimulada(punto);
+
+    if (llego) {
+      _detenerSimulacion();
+      showAppSnackBar(
+        context,
+        'Llegaste. Confirma el paso en la tarjeta para continuar.',
+        isError: false,
+      );
+    }
+  }
+
+  Future<void> _enviarPosicionSimulada(LatLng punto) async {
+    if (_enviandoSimulada) return;
+    _enviandoSimulada = true;
+    try {
+      await _enviarPosicion(punto.latitude, punto.longitude);
+    } catch (_) {
+      // Un envío perdido no importa: el siguiente paso manda otra posición.
+    } finally {
+      _enviandoSimulada = false;
+    }
+  }
+
+  /// Detiene el movimiento (la moto se queda donde va).
+  void _detenerSimulacion() {
+    if (_simulacion == null && _recorrido == null) return;
+    _simulacion?.cancel();
+    _simulacion = null;
+    _recorrido = null;
+    if (mounted) setState(() {});
+  }
+
+  void _cambiarVelocidad() {
+    setState(() {
+      _factorVelocidad = _factorVelocidad >= 4 ? 1 : _factorVelocidad * 2;
+    });
   }
 
   void _abrirPerfil() {
@@ -517,18 +634,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           ui.Paint()..color = _rojo,
         );
       });
-      // Tú: flecha de navegación.
-      final yo = await _crearPin(_azul, (lienzo, c) {
-        lienzo.drawPath(
-          ui.Path()
-            ..moveTo(c.dx, c.dy - 12)
-            ..lineTo(c.dx + 10, c.dy + 11)
-            ..lineTo(c.dx, c.dy + 5)
-            ..lineTo(c.dx - 10, c.dy + 11)
-            ..close(),
-          blanco,
-        );
-      });
+      // Tú: la moto del repartidor.
+      final yo = await crearIconoMoto(color: _azul);
       if (!mounted) return;
       setState(() {
         _pinRestaurante = restaurante;
@@ -546,7 +653,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   LatLng? _punto(double? lat, double? lon) =>
       (lat == null || lon == null) ? null : LatLng(lat, lon);
 
-  LatLng? get _yoPunto => _punto(posicion?.latitude, posicion?.longitude);
+  LatLng? get _yoPunto =>
+      _posSimulada ?? _punto(posicion?.latitude, posicion?.longitude);
 
   Marker _marcador(
     String id,
@@ -556,12 +664,14 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     double tonoDeRespaldo, {
     String? detalle,
     VoidCallback? alTocar,
+    Offset? ancla,
   }) {
     return Marker(
       markerId: MarkerId(id),
       position: pos,
       infoWindow: InfoWindow(title: titulo, snippet: detalle),
       icon: icono ?? BitmapDescriptor.defaultMarkerWithHue(tonoDeRespaldo),
+      anchor: icono != null && ancla != null ? ancla : const Offset(0.5, 1.0),
       onTap: alTocar,
     );
   }
@@ -576,6 +686,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           'Tú estás aquí',
           _pinYo,
           BitmapDescriptor.hueAzure,
+          ancla: const Offset(0.5, 0.5),
         ),
     };
 
@@ -935,7 +1046,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         final alto = c.maxHeight;
         final inicial = (330 / alto).clamp(0.3, 0.5).toDouble();
         _hojaInicial = inicial;
-        _hojaMax = 0.94;
+        _hojaMax = 0.78;
         return Stack(
           children: [
             Positioned(
@@ -1067,9 +1178,11 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
       'entregado': 'Confirmar entrega',
     };
 
+    final demo = _demoDisponible && p.estado != 'entregado';
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       decoration: const BoxDecoration(
         color: _papel,
         border: Border(bottom: BorderSide(color: _linea)),
@@ -1084,26 +1197,67 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                   'PEDIDO #${p.id} · ${p.restaurante.toUpperCase()}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: _rotulo(size: 10),
+                  style: _rotulo(size: 9),
                 ),
               ),
               const SizedBox(width: 8),
-              _Rotulo(
-                texto: textoEstado(p.estado).toUpperCase(),
-                fondo: _tinta,
-                color: Colors.white,
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                color: _tinta,
+                child: Text(
+                  textoEstado(p.estado).toUpperCase(),
+                  style: _rotulo(color: Colors.white, size: 8.5),
+                ),
               ),
             ],
           ),
-          if (siguiente != null) ...[
-            const SizedBox(height: 10),
-            _Boton(
-              texto: textoAccion[siguiente] ?? 'Continuar',
-              icono: Icons.arrow_forward,
-              cargando: _ocupados.contains(p.id),
-              onPressed: () => _cambiarEstado(p, siguiente),
-            ),
-          ],
+          const SizedBox(height: 6),
+          // Una sola fila: acción siguiente + demo (play / velocidad).
+          Row(
+            children: [
+              if (siguiente != null)
+                Expanded(
+                  child: _Boton(
+                    texto: textoAccion[siguiente] ?? 'Continuar',
+                    icono: Icons.arrow_forward,
+                    alto: 38,
+                    cargando: _ocupados.contains(p.id),
+                    onPressed: () => _cambiarEstado(p, siguiente),
+                  ),
+                )
+              else
+                const Spacer(),
+              if (demo) ...[
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 42,
+                  child: Tooltip(
+                    message: _simulando ? 'Detener demo' : 'Simular trayecto',
+                    child: _Boton(
+                      texto: '',
+                      icono: _simulando ? Icons.stop : Icons.play_arrow,
+                      primario: false,
+                      alto: 38,
+                      onPressed: () => _simulando
+                          ? _detenerSimulacion()
+                          : _iniciarSimulacion(p),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 42,
+                  child: _Boton(
+                    texto: 'x$_factorVelocidad',
+                    primario: false,
+                    alto: 38,
+                    onPressed: _cambiarVelocidad,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -1130,7 +1284,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     return ListView(
       controller: scroll,
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
       children: hijos,
     );
   }
@@ -1148,18 +1302,13 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         child: SafeArea(
           bottom: false,
           child: SizedBox(
-            height: 64,
+            height: alturaBarraFE(context),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
                   const SizedBox(width: 8),
-                  Image.asset(
-                    'assets/images/logo-food-express.png',
-                    width: angosta ? 110 : 150,
-                    height: 46,
-                    fit: BoxFit.contain,
-                  ),
+                  LogoFE(ancho: anchoLogoBarra(context)),
                   if (!angosta) ...[
                     const SizedBox(width: 14),
                     const _Rotulo(
@@ -1571,6 +1720,9 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
     final motivo = _motivoBloqueo(p);
     final bloqueado = motivo != null;
 
+    final cel = _esCel(context);
+    final sep = cel ? 10.0 : 18.0;
+
     String km(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)} km';
 
     return _Caja(
@@ -1586,9 +1738,9 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('PEDIDO #${p.id}', style: _rotulo()),
-                    const SizedBox(height: 4),
-                    Text(p.restaurante, style: _titulo(size: 21)),
+                    Text('PEDIDO #${p.id}', style: _rotulo(size: cel ? 9.5 : 10.5)),
+                    SizedBox(height: cel ? 2 : 4),
+                    Text(p.restaurante, style: _titulo(size: cel ? 17 : 21)),
                   ],
                 ),
               ),
@@ -1596,23 +1748,23 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(dinero(p.total), style: _titulo(size: 22)),
-                  const SizedBox(height: 6),
+                  Text(dinero(p.total), style: _titulo(size: cel ? 18 : 22)),
+                  SizedBox(height: cel ? 4 : 6),
                   _etiquetaCobro(p.cobraEnEfectivo),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: sep),
           _Itinerario(
             recoger: p.restauranteDireccion ?? p.restaurante,
             entregar: p.direccionEntrega ?? 'Sin dirección',
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: sep),
           _FranjaDatos(
             datos: [
-              ('AL RESTAURANTE', km(p.distanciaKm)),
-              ('DE ENTREGA', km(p.distanciaEntregaKm)),
+              (cel ? 'RECOGER' : 'AL RESTAURANTE', km(p.distanciaKm)),
+              (cel ? 'ENTREGA' : 'DE ENTREGA', km(p.distanciaEntregaKm)),
               (
                 'TIEMPO',
                 p.minutosEstimados == null ? '—' : '≈ ${p.minutosEstimados} min',
@@ -1620,13 +1772,13 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             ],
           ),
           if (motivo != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               motivo,
               style: AppTypography.body(color: _naranja, size: 12.5),
             ),
           ],
-          const SizedBox(height: 18),
+          SizedBox(height: sep),
           Row(
             children: [
               Expanded(
@@ -1776,6 +1928,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   bool _accionEnMapa(Pedido p) => !_movil && _activoSel?.id == p.id;
 
   Widget _tarjetaActivo(Pedido p) {
+    final cel = _esCel(context);
     final ocupado = _ocupados.contains(p.id);
     final haciaRestaurante = p.estado == 'aceptado';
     final siguiente = _siguienteDe(p);
@@ -1798,9 +1951,10 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('ORDEN ACTIVA · PEDIDO #${p.id}', style: _rotulo()),
-                    const SizedBox(height: 4),
-                    Text(p.restaurante, style: _titulo(size: 21)),
+                    Text(cel ? 'PEDIDO #${p.id}' : 'ORDEN ACTIVA · PEDIDO #${p.id}',
+                        style: _rotulo(size: cel ? 9.5 : 10.5)),
+                    SizedBox(height: cel ? 2 : 4),
+                    Text(p.restaurante, style: _titulo(size: cel ? 17 : 21)),
                   ],
                 ),
               ),
@@ -1812,7 +1966,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: cel ? 10 : 18),
           _Itinerario(
             recoger: p.restauranteDireccion ?? p.restaurante,
             entregar: p.direccionEntrega ?? 'Sin dirección',
@@ -1821,10 +1975,10 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             recogido: !haciaRestaurante,
           ),
           if (p.items.isNotEmpty) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: cel ? 10 : 16),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(cel ? 10 : 14),
               decoration: const BoxDecoration(
                 color: _papel,
                 border: Border.fromBorderSide(BorderSide(color: _linea)),
@@ -1838,14 +1992,14 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                     p.items.map((i) => '${i.cantidad}× ${i.nombre}').join(', '),
                     style: AppTypography.body(size: 13),
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: cel ? 6 : 12),
                   Wrap(
                     alignment: WrapAlignment.spaceBetween,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 12,
                     runSpacing: 8,
                     children: [
-                      Text(dinero(p.total), style: _titulo(size: 22)),
+                      Text(dinero(p.total), style: _titulo(size: cel ? 18 : 22)),
                       _etiquetaCobro(p.cobraEnEfectivo),
                     ],
                   ),
@@ -1854,15 +2008,15 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             ),
           ],
           if (!_accionEnMapa(p)) ...[
-            const SizedBox(height: 20),
+            SizedBox(height: cel ? 12 : 20),
             Text('AVANCE DE LA ENTREGA', style: _rotulo()),
-            const SizedBox(height: 10),
+            SizedBox(height: cel ? 6 : 10),
             _ProgresoEntrega(estado: p.estado),
           ],
           // El botón de la acción siguiente del pedido elegido va fijo arriba
           // (celular) o sobre el mapa (pantalla ancha); aquí solo los demás.
           if (siguiente != null && _activoSel?.id != p.id) ...[
-            const SizedBox(height: 18),
+            SizedBox(height: cel ? 10 : 18),
             _Boton(
               texto: textoAccion[siguiente] ?? 'Continuar',
               icono: Icons.arrow_forward,
@@ -1904,10 +2058,12 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
         }
       }
     } else {
-      rotuloTarjeta = 'PEDIDOS EN TU ZONA';
+      rotuloTarjeta = compacto ? 'EN TU ZONA' : 'PEDIDOS EN TU ZONA';
       textoTarjeta = disponibles.length == 1
-          ? '1 punto de recogida'
-          : '${disponibles.length} puntos de recogida';
+          ? (compacto ? '1 pedido' : '1 punto de recogida')
+          : (compacto
+              ? '${disponibles.length} pedidos'
+              : '${disponibles.length} puntos de recogida');
       detalleTarjeta = 'Toca un pin o una tarjeta';
     }
 
@@ -1974,7 +2130,12 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
             alignment: Alignment.topLeft,
             child: Container(
               constraints: const BoxConstraints(maxWidth: 320),
-              padding: EdgeInsets.fromLTRB(14, compacto ? 8 : 10, 16, compacto ? 8 : 10),
+              padding: EdgeInsets.fromLTRB(
+                compacto ? 8 : 14,
+                compacto ? 4 : 10,
+                compacto ? 8 : 16,
+                compacto ? 4 : 10,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 border: Border.fromBorderSide(BorderSide(color: _linea)),
@@ -1983,15 +2144,15 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(rotuloTarjeta, style: _rotulo(size: 9.5)),
-                  const SizedBox(height: 3),
+                  Text(rotuloTarjeta, style: _rotulo(size: compacto ? 7.5 : 9.5)),
+                  SizedBox(height: compacto ? 1 : 3),
                   Text(
                     textoTarjeta,
-                    maxLines: 2,
+                    maxLines: compacto ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: _titulo(size: compacto ? 15 : 17),
+                    style: _titulo(size: compacto ? 11.5 : 17),
                   ),
-                  if (detalleTarjeta != null)
+                  if (detalleTarjeta != null && !compacto)
                     Text(
                       detalleTarjeta,
                       style: AppTypography.body(
@@ -2001,8 +2162,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                     ),
                   if (compacto && enCurso && activo != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(pie, style: _rotulo(size: 8.5)),
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(pie, style: _rotulo(size: 7.5)),
                     ),
                 ],
               ),
@@ -2020,8 +2181,8 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
                 child: InkWell(
                   onTap: _ajustarCamara,
                   child: Container(
-                    width: 42,
-                    height: 42,
+                    width: compacto ? 34 : 42,
+                    height: compacto ? 34 : 42,
                     decoration: BoxDecoration(
                       color: Colors.white,
                       border: Border.all(color: _linea),
@@ -2168,6 +2329,31 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               onPressed: () => _cambiarEstado(p, siguiente),
             ),
           ],
+          if (_demoDisponible && p.estado != 'entregado') ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _Boton(
+                    texto: _simulando ? 'Detener demo' : 'Simular trayecto',
+                    icono: _simulando ? Icons.stop : Icons.play_arrow,
+                    primario: false,
+                    onPressed: () =>
+                        _simulando ? _detenerSimulacion() : _iniciarSimulacion(p),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 78,
+                  child: _Boton(
+                    texto: 'x$_factorVelocidad',
+                    primario: false,
+                    onPressed: _cambiarVelocidad,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -2247,14 +2433,15 @@ class _Caja extends StatelessWidget {
     final fondo = acento == null
         ? Colors.white
         : Color.alphaBlend(acento!.withAlpha(22), Colors.white);
+    final cel = _esCel(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: EdgeInsets.only(bottom: cel ? 10 : 14),
       child: Material(
         color: fondo,
         child: InkWell(
           onTap: onTap,
           child: Container(
-            padding: const EdgeInsets.all(18),
+            padding: EdgeInsets.all(cel ? 12 : 18),
             decoration: BoxDecoration(border: Border.fromBorderSide(borde)),
             child: child,
           ),
@@ -2263,6 +2450,9 @@ class _Caja extends StatelessWidget {
     );
   }
 }
+
+/// Celular: las tarjetas se compactan para no tapar el mapa.
+bool _esCel(BuildContext context) => MediaQuery.of(context).size.width < 600;
 
 /// Rótulo rectangular (estado, pago…).
 class _Rotulo extends StatelessWidget {
@@ -2356,24 +2546,27 @@ class _Itinerario extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cel = _esCel(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _fila(
+          cel: cel,
           nodo: _Nodo(texto: recogido ? '✓' : 'A', relleno: true),
           rotulo: 'RECOGER EN',
           texto: recoger,
           detalle: detalleRecoger,
         ),
-        const Padding(
-          padding: EdgeInsets.only(left: 12),
+        Padding(
+          padding: const EdgeInsets.only(left: 12),
           child: SizedBox(
             width: 1,
-            height: 16,
-            child: ColoredBox(color: _tinta),
+            height: cel ? 8 : 16,
+            child: const ColoredBox(color: _tinta),
           ),
         ),
         _fila(
+          cel: cel,
           nodo: const _Nodo(texto: 'B', relleno: false),
           rotulo: 'ENTREGAR EN',
           texto: entregar,
@@ -2384,6 +2577,7 @@ class _Itinerario extends StatelessWidget {
   }
 
   Widget _fila({
+    required bool cel,
     required Widget nodo,
     required String rotulo,
     required String texto,
@@ -2393,16 +2587,21 @@ class _Itinerario extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         nodo,
-        const SizedBox(width: 12),
+        SizedBox(width: cel ? 10 : 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(rotulo, style: _rotulo(size: 9.5)),
-              const SizedBox(height: 2),
+              Text(rotulo, style: _rotulo(size: cel ? 9 : 9.5)),
+              const SizedBox(height: 1),
               Text(
                 texto,
-                style: AppTypography.body(weight: FontWeight.w600, size: 14),
+                maxLines: cel ? 2 : null,
+                overflow: cel ? TextOverflow.ellipsis : null,
+                style: AppTypography.body(
+                  weight: FontWeight.w600,
+                  size: cel ? 13 : 14,
+                ),
               ),
             ],
           ),
@@ -2428,19 +2627,23 @@ class _FranjaDatos extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cel = _esCel(context);
     final celdas = <Widget>[];
     for (var i = 0; i < datos.length; i++) {
       if (i > 0) celdas.add(const VerticalDivider(width: 1, color: _linea));
       celdas.add(
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(
+              horizontal: cel ? 10 : 12,
+              vertical: cel ? 6 : 10,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(datos[i].$1, style: _rotulo(size: 9)),
-                const SizedBox(height: 4),
-                Text(datos[i].$2, style: _titulo(size: 17)),
+                Text(datos[i].$1, style: _rotulo(size: cel ? 8.5 : 9)),
+                SizedBox(height: cel ? 2 : 4),
+                Text(datos[i].$2, style: _titulo(size: cel ? 14 : 17)),
               ],
             ),
           ),
@@ -2526,6 +2729,9 @@ class _Boton extends StatelessWidget {
   final bool cargando;
   final bool bloqueado;
 
+  /// Alto fijo opcional (barras compactas); si es nulo se usa el estándar.
+  final double? alto;
+
   const _Boton({
     required this.texto,
     required this.onPressed,
@@ -2533,6 +2739,7 @@ class _Boton extends StatelessWidget {
     this.primario = true,
     this.cargando = false,
     this.bloqueado = false,
+    this.alto,
   });
 
   @override
@@ -2557,14 +2764,16 @@ class _Boton extends StatelessWidget {
 
     return SizedBox(
       width: double.infinity,
-      height: 52,
+      height: alto ?? (_esCel(context) ? 44 : 52),
       child: Material(
         color: fondo,
         child: InkWell(
           onTap: deshabilitado ? null : onPressed,
           child: Container(
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: EdgeInsets.symmetric(
+              horizontal: _esCel(context) ? 8 : 12,
+            ),
             decoration: BoxDecoration(border: Border.all(color: borde)),
             child: cargando
                 ? SizedBox(
@@ -2578,20 +2787,21 @@ class _Boton extends StatelessWidget {
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (texto.isNotEmpty)
                       Flexible(
                         child: Text(
                           texto.toUpperCase(),
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.poppins(
-                            fontSize: 12,
+                            fontSize: _esCel(context) ? 11 : 12,
                             fontWeight: FontWeight.w700,
-                            letterSpacing: 1.2,
+                            letterSpacing: _esCel(context) ? 0.7 : 1.2,
                             color: tinta,
                           ),
                         ),
                       ),
                       if (icono != null) ...[
-                        const SizedBox(width: 10),
+                        if (texto.isNotEmpty) const SizedBox(width: 8),
                         Icon(icono, size: 18, color: tinta),
                       ],
                     ],

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
@@ -210,42 +211,7 @@ class _PagoScreenState extends State<PagoScreen> with WidgetsBindingObserver {
   }
 
   Widget _barraSuperior() {
-    return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: grisBorde),
-              ),
-              child: const Icon(Icons.arrow_back, color: verdeOscuro),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text('Pagar', style: AppTypography.title(size: 20)),
-          ),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
-    );
+    return const BarraSuperiorFE(titulo: 'Pagar');
   }
 
   Widget _nodo({required bool hecho, required bool actual}) {
