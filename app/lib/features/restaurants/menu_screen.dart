@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../../core/format.dart';
 import '../../core/imagenes.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../cart/carrito_screen.dart';
 import '../cart/carrito_service.dart';
+import '../resenas/resena_service.dart';
+import '../resenas/resenas_dialog.dart';
 import 'restaurant_model.dart';
 import 'restaurant_service.dart';
 
@@ -72,7 +75,27 @@ class _MenuScreenState extends State<MenuScreen> {
   @override
   void initState() {
     super.initState();
+    _promedio = widget.restaurante.calificacionPromedio;
+    _totalResenas = widget.restaurante.totalResenas;
     cargarMenu();
+    _cargarResenas();
+  }
+
+  // Calificación del restaurante (Sprint 5, historia #28).
+  double? _promedio;
+  int _totalResenas = 0;
+
+  Future<void> _cargarResenas() async {
+    try {
+      final r = await ResenaService.deRestaurante(widget.restaurante.id);
+      if (!mounted) return;
+      setState(() {
+        _promedio = r.promedio;
+        _totalResenas = r.total;
+      });
+    } catch (_) {
+      // Si falla, se queda con lo que ya traía la tarjeta.
+    }
   }
 
   @override
@@ -306,49 +329,10 @@ class _MenuScreenState extends State<MenuScreen> {
   // =====================================================
 
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          // Botón de regreso cuadrado.
-          InkWell(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: grisBorde),
-              ),
-              child: const Icon(Icons.arrow_back, color: verdeOscuro),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              widget.restaurante.nombre,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.title(size: 18),
-            ),
-          ),
-          _botonCarrito(),
-          const SizedBox(width: 14),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+    return BarraSuperiorFE(
+      titulo: widget.restaurante.nombre,
+      margen: margen,
+      acciones: [_botonCarrito()],
     );
   }
 
@@ -435,24 +419,23 @@ class _MenuScreenState extends State<MenuScreen> {
             ),
           ),
 
-          // Atenúa la foto (capa verde oscuro pareja) y, encima, un degradado
-          // más fuerte a la izquierda para que las letras resalten.
-          const ColoredBox(color: Color(0x8A00292B)),
+          // Capa pareja muy ligera + degradado solo a la izquierda, para que
+          // las letras se lean y la foto se vea completa a la derecha.
+          const ColoredBox(color: Color(0x1A00292B)),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: [
-                  Color(0xF2003033),
                   Color(0xB3003033),
-                  Color(0x33003033),
+                  Color.fromARGB(174, 0, 48, 51),
+                  Color.fromARGB(103, 5, 76, 91),
                 ],
-                stops: [0.0, 0.6, 1.0],
+                stops: [0.0, 0.55, 1.0],
               ),
             ),
           ),
-
           Padding(
             padding: EdgeInsets.symmetric(horizontal: margen),
             child: Align(
@@ -534,8 +517,13 @@ class _MenuScreenState extends State<MenuScreen> {
   // FRANJA DE DATOS (distancia, traslado, envío, pago)
   // =====================================================
 
-  Widget _celdaDato(IconData icono, String rotulo, String valor) {
-    return Padding(
+  Widget _celdaDato(
+    IconData icono,
+    String rotulo,
+    String valor, {
+    VoidCallback? onTap,
+  }) {
+    final celda = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
@@ -568,6 +556,8 @@ class _MenuScreenState extends State<MenuScreen> {
         ],
       ),
     );
+    if (onTap == null) return celda;
+    return InkWell(onTap: onTap, hoverColor: menta, child: celda);
   }
 
   Widget _franjaDatos(bool compacto) {
@@ -591,9 +581,16 @@ class _MenuScreenState extends State<MenuScreen> {
         'Desde \$30',
       ),
       _celdaDato(
-        Icons.payments_outlined,
-        'PAGO',
-        'Efectivo o Mercado Pago',
+        Icons.star_rounded,
+        'CALIFICACIÓN',
+        _promedio == null || _totalResenas == 0
+            ? 'Sin reseñas · ver'
+            : '★ ${_promedio!.toStringAsFixed(1)} · $_totalResenas ${_totalResenas == 1 ? 'reseña' : 'reseñas'}',
+        onTap: () => mostrarResenasRestaurante(
+          context,
+          restauranteId: widget.restaurante.id,
+          nombre: widget.restaurante.nombre,
+        ),
       ),
     ];
 

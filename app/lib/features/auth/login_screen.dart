@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/widgets.dart';
 import 'auth_service.dart';
 import 'puerta_sesion.dart';
+import 'recuperar_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -89,11 +90,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _mostrarRecuperacion() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'La recuperación de contraseña estará '
-          'disponible próximamente.',
+    if (_cargando) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecuperarScreen(
+          correoInicial: _correoController.text.trim(),
         ),
       ),
     );

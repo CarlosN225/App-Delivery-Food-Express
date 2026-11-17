@@ -53,6 +53,7 @@ class ItemOut(BaseModel):
 class PedidoOut(BaseModel):
     id: int
     cliente_id: int
+    cliente_nombre: Optional[str] = None
     repartidor_id: Optional[int] = None
     restaurante_id: int
     restaurante: str
@@ -74,6 +75,7 @@ class PedidoOut(BaseModel):
 
 class PedidoDisponibleOut(BaseModel):
     id: int
+    cliente_nombre: Optional[str] = None
     restaurante_id: int
     restaurante: str
     restaurante_direccion: Optional[str] = None

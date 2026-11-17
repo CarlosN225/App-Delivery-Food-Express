@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.restaurante import Restaurante
 from app.schemas.restaurante import RestauranteCercano
+from app.routers.resenas import promedios_por_restaurante
 from app.services.seguridad import sanitizar_busqueda
 
 
@@ -88,6 +89,7 @@ def obtener_restaurantes_cercanos(
     termino = _normalizar(sanitizar_busqueda(q))
 
     restaurantes = db.query(Restaurante).all()
+    promedios = promedios_por_restaurante(db)
 
     restaurantes_cercanos = []
 
@@ -126,6 +128,8 @@ def obtener_restaurantes_cercanos(
                     latitud=restaurante.latitud,
                     longitud=restaurante.longitud,
                     distancia_km=round(distancia, 2),
+                    calificacion_promedio=promedios.get(restaurante.id, (None, 0))[0],
+                    total_resenas=promedios.get(restaurante.id, (None, 0))[1],
                 )
             )
 

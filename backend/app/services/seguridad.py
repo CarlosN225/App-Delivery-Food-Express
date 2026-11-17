@@ -78,12 +78,19 @@ class FiltroPII(logging.Filter):
     """Filtro de logging: enmascara datos personales antes de escribir el log."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Se enmascara el texto y cada argumento por separado, SIN quitar los
+        # argumentos: el log de acceso de uvicorn los necesita como tupla
+        # (cliente, método, ruta, versión, estado) para darle formato.
         try:
-            mensaje = record.getMessage()
+            if isinstance(record.msg, str):
+                record.msg = enmascarar_texto(record.msg)
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    enmascarar_texto(a) if isinstance(a, str) else a
+                    for a in record.args
+                )
         except Exception:
-            return True
-        record.msg = enmascarar_texto(mensaje)
-        record.args = None
+            pass
         return True
 
 

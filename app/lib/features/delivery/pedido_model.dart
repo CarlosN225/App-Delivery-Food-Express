@@ -53,6 +53,7 @@ class ItemPedido {
 class Pedido {
   final int id;
   final int clienteId;
+  final String? clienteNombre;
   final int? repartidorId;
   final int restauranteId;
   final String restaurante;
@@ -74,6 +75,7 @@ class Pedido {
   Pedido({
     required this.id,
     required this.clienteId,
+    this.clienteNombre,
     this.repartidorId,
     required this.restauranteId,
     required this.restaurante,
@@ -100,6 +102,7 @@ class Pedido {
     return Pedido(
       id: json['id'] as int,
       clienteId: json['cliente_id'] as int,
+      clienteNombre: json['cliente_nombre'] as String?,
       repartidorId: json['repartidor_id'] as int?,
       restauranteId: json['restaurante_id'] as int,
       restaurante: json['restaurante'] as String,
@@ -140,6 +143,7 @@ class Pedido {
 /// Pedido que aún espera repartidor (panel del repartidor).
 class PedidoDisponible {
   final int id;
+  final String? clienteNombre;
   final int restauranteId;
   final String restaurante;
   final String? restauranteDireccion;
@@ -158,6 +162,7 @@ class PedidoDisponible {
 
   PedidoDisponible({
     required this.id,
+    this.clienteNombre,
     required this.restauranteId,
     required this.restaurante,
     this.restauranteDireccion,
@@ -177,6 +182,7 @@ class PedidoDisponible {
   factory PedidoDisponible.fromJson(Map<String, dynamic> json) {
     return PedidoDisponible(
       id: json['id'] as int,
+      clienteNombre: json['cliente_nombre'] as String?,
       restauranteId: json['restaurante_id'] as int,
       restaurante: json['restaurante'] as String,
       restauranteDireccion: json['restaurante_direccion'] as String?,

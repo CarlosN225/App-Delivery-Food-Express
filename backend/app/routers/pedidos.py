@@ -98,6 +98,7 @@ def _pedido_a_dict(p: Pedido) -> dict:
     return {
         "id": p.id,
         "cliente_id": p.cliente_id,
+        "cliente_nombre": p.cliente.nombre if p.cliente else None,
         "repartidor_id": p.repartidor_id,
         "restaurante_id": p.restaurante_id,
         "restaurante": r.nombre,
@@ -352,6 +353,7 @@ def pedidos_disponibles(
         resultado.append(
             {
                 "id": p.id,
+                "cliente_nombre": p.cliente.nombre if p.cliente else None,
                 "restaurante_id": p.restaurante_id,
                 "restaurante": p.restaurante.nombre,
                 "restaurante_direccion": p.restaurante.direccion,
