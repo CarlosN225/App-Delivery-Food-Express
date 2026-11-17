@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../core/api_client.dart';
+import '../../core/firebase_config.dart';
+import 'firebase_auth_service.dart';
 import 'sesion_service.dart';
 
 /// Datos del usuario ya autenticado, junto con su token de sesión.
@@ -48,6 +51,9 @@ class AuthService {
         _detalleError(respuesta.body) ?? 'No se pudo completar el registro.',
       );
     }
+
+    // Firebase (nube): se refleja la cuenta para poder recuperar la contraseña.
+    unawaited(FirebaseAuthService.asegurarCuenta(correo, contrasena));
   }
 
   Future<UsuarioAutenticado> iniciarSesion({
@@ -60,13 +66,25 @@ class AuthService {
       body: {'username': correo, 'password': contrasena},
     );
 
-    if (respuestaLogin.statusCode != 200) {
-      throw AuthException(
-        _detalleError(respuestaLogin.body) ?? 'Correo o contraseña incorrectos.',
-      );
+    String token;
+    if (respuestaLogin.statusCode == 200) {
+      token = jsonDecode(respuestaLogin.body)['access_token'] as String;
+      // Firebase (nube): se refleja la cuenta (también las que ya existían).
+      unawaited(FirebaseAuthService.asegurarCuenta(correo, contrasena));
+    } else {
+      // Puede que la contraseña se haya restablecido con Firebase: si Firebase
+      // la acepta, el backend actualiza la suya y abre la sesión.
+      final sincronizado = respuestaLogin.statusCode == 401
+          ? await _sincronizarConFirebase(correo, contrasena)
+          : null;
+      if (sincronizado == null) {
+        throw AuthException(
+          _detalleError(respuestaLogin.body) ??
+              'Correo o contraseña incorrectos.',
+        );
+      }
+      token = sincronizado;
     }
-
-    final token = jsonDecode(respuestaLogin.body)['access_token'] as String;
 
     final respuestaMe = await http.get(
       Uri.parse('${ApiConfig.baseUrl}/auth/me'),
@@ -86,6 +104,30 @@ class AuthService {
       rol: datos['rol'] as String,
       token: token,
     );
+  }
+
+  /// Recuperación con Firebase: si Firebase reconoce el correo y la contraseña
+  /// (porque se restablecieron desde el enlace), el backend verifica el ID token
+  /// y actualiza la contraseña de la app. Devuelve el token de sesión o null.
+  Future<String?> _sincronizarConFirebase(
+    String correo,
+    String contrasena,
+  ) async {
+    if (!FirebaseConfig.disponible) return null;
+    try {
+      final idToken = await FirebaseAuthService.iniciarSesion(correo, contrasena);
+      if (idToken == null) return null;
+
+      final respuesta = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/firebase/sincronizar'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'id_token': idToken, 'contrasena': contrasena}),
+      );
+      if (respuesta.statusCode != 200) return null;
+      return jsonDecode(respuesta.body)['access_token'] as String;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Si quedó una sesión guardada, la valida con el servidor y devuelve al

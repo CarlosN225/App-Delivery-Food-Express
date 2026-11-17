@@ -24,6 +24,13 @@ class UsuarioLogin(BaseModel):
     contrasena: str
 
 
+class FirebaseSincronizar(BaseModel):
+    """Tras restablecer la contraseña en Firebase: ID token + contraseña nueva."""
+
+    id_token: str = Field(min_length=20, max_length=4096)
+    contrasena: str = Field(min_length=6, max_length=72)
+
+
 class UsuarioOut(BaseModel):
     id: int
     nombre: str

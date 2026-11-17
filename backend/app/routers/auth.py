@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.usuario import Usuario, RolUsuario
-from app.schemas.usuario import UsuarioCreate, UsuarioOut, Token
+from app.schemas.usuario import FirebaseSincronizar, UsuarioCreate, UsuarioOut, Token
+from app.services.firebase_auth import consultar_cuenta
 from app.services.security import (
     hash_contrasena,
     verificar_contrasena,
@@ -73,6 +75,41 @@ def iniciar_sesion(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tu cuenta está desactivada. Contacta al administrador.",
         )
+    token = crear_access_token(datos={"sub": usuario.correo, "rol": usuario.rol.value})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/firebase/sincronizar", response_model=Token)
+def sincronizar_con_firebase(datos: FirebaseSincronizar, db: Session = Depends(get_db)):
+    """
+    Recuperación de contraseña con Firebase Authentication (nube).
+
+    Firebase manda el correo y guarda la contraseña nueva. Aquí se comprueba el
+    ID token contra Firebase y, si el correo está verificado (restablecer por
+    enlace lo verifica) y pertenece a un usuario de la app, se actualiza la
+    contraseña local y se abre la sesión.
+    """
+    no_valido = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudo validar tu cuenta de Firebase. Restablece tu contraseña desde el correo.",
+    )
+    cuenta = consultar_cuenta(datos.id_token)
+    if cuenta is None or not cuenta["verificado"]:
+        raise no_valido
+
+    usuario = (
+        db.query(Usuario).filter(func.lower(Usuario.correo) == cuenta["correo"]).first()
+    )
+    if usuario is None:
+        raise no_valido
+    if not usuario.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu cuenta está desactivada. Contacta al administrador.",
+        )
+
+    usuario.contrasena_hash = hash_contrasena(datos.contrasena)
+    db.commit()
     token = crear_access_token(datos={"sub": usuario.correo, "rol": usuario.rol.value})
     return {"access_token": token, "token_type": "bearer"}
 
