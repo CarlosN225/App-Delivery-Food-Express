@@ -26,6 +26,13 @@ class Sanitizador {
     return texto;
   }
 
+  /// Para comentarios (reseñas): se permite puntuación normal, pero no los
+  /// símbolos de marcado (< > ` \ { } $) que se usan en XSS e inyección.
+  static final List<TextInputFormatter> formateadoresComentario = [
+    FilteringTextInputFormatter.deny(RegExp(r'[<>`\\{}$]')),
+    LengthLimitingTextInputFormatter(300),
+  ];
+
   /// Bloquea los caracteres peligrosos mientras la persona escribe.
   static final List<TextInputFormatter> formateadoresBusqueda = [
     FilteringTextInputFormatter.allow(

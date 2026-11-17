@@ -80,3 +80,15 @@ def test_busqueda_en_restaurantes_cercanos(client, menu):
     # Un intento de inyección no rompe nada ni devuelve filas de más.
     ataque = client.get("/restaurantes/cercanos", params={**base, "q": "' OR 1=1; --"})
     assert ataque.status_code == 200
+
+
+def test_filtro_pii_conserva_los_argumentos_del_log_de_acceso():
+    """uvicorn.access necesita sus 5 argumentos como tupla; el filtro no debe quitarlos."""
+    registro = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("189.216.117.152:0", "PUT", "/pedidos/19/ubicacion", "1.1", 200), None,
+    )
+    FiltroPII().filter(registro)
+    assert isinstance(registro.args, tuple) and len(registro.args) == 5
+    assert registro.getMessage() == '189.216.117.152:0 - "PUT /pedidos/19/ubicacion HTTP/1.1" 200'
