@@ -84,3 +84,15 @@ def test_al_entregar_uno_puede_tomar_otro(client, menu, cliente, repartidor):
         r = client.put(f"/pedidos/{ids[0]}/estado", headers=repartidor, json={"estado": estado})
         assert r.status_code == 200, r.text
     assert client.put(f"/pedidos/{ids[2]}/aceptar", headers=repartidor).status_code == 200
+
+
+def test_el_repartidor_ve_el_nombre_del_cliente(client, menu, cliente, repartidor):
+    """El panel del repartidor muestra a quién se entrega (disponibles y en curso)."""
+    pid = _pedido(client, cliente, menu["pizza"], menu["pepperoni"])
+
+    disponibles = client.get("/pedidos/disponibles", headers=repartidor).json()
+    assert disponibles[0]["cliente_nombre"] == "Ana"
+
+    assert client.put(f"/pedidos/{pid}/aceptar", headers=repartidor).status_code == 200
+    activos = client.get("/pedidos/activos", headers=repartidor).json()
+    assert activos[0]["cliente_nombre"] == "Ana"

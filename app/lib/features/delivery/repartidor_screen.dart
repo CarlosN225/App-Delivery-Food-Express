@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../core/location_service.dart';
 import '../../core/seguridad/entorno.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../admin/dialogo_confirmar.dart';
 import '../auth/auth_service.dart';
 import '../auth/login_screen.dart';
 import '../auth/sesion_service.dart';
@@ -121,6 +123,9 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   /// cuando se aleja más de [_metrosParaRecalcular]).
   final Map<String, LatLng?> _origenRuta = {};
   static const double _metrosParaRecalcular = 200;
+
+  /// Más lejos que esto del domicilio, "Confirmar entrega" pide confirmación.
+  static const double _metrosParaEntregar = 150;
 
   // ---- demostración: simula el trayecto sobre la ruta por calles
   Timer? _simulacion;
@@ -302,6 +307,33 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
 
   /// Avanza el pedido al siguiente estado (Recogido, En camino, Entregado).
   Future<void> _cambiarEstado(Pedido p, String nuevo) async {
+    // Entregar lejos del domicilio casi siempre es un toque por error: se pide
+    // confirmar. Sin GPS no se puede saber, así que no se estorba.
+    if (nuevo == 'entregado') {
+      final yo = _yoPunto;
+      final destino = _punto(p.latitudEntrega, p.longitudEntrega);
+      if (yo != null && destino != null) {
+        final metros = Geolocator.distanceBetween(
+          yo.latitude,
+          yo.longitude,
+          destino.latitude,
+          destino.longitude,
+        );
+        if (metros > _metrosParaEntregar) {
+          final lejos = metros >= 1000
+              ? '${(metros / 1000).toStringAsFixed(1)} km'
+              : '${metros.round()} m';
+          final seguro = await confirmarAccion(
+            context,
+            titulo: 'Aún no has llegado',
+            mensaje:
+                'Estás a $lejos del domicilio de entrega. ¿Seguro que quieres terminar la entrega del pedido #${p.id}?',
+            textoConfirmar: 'Sí, terminar',
+          );
+          if (!seguro || !mounted) return;
+        }
+      }
+    }
     _detenerSimulacion();
     await _accion(
       p.id,
@@ -765,6 +797,67 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
   List<({bool alRestaurante, List<LatLng> puntos, bool porCalles})> _tramosDe(
     Pedido p,
   ) {
+    final todos = _tramosSinRecortar(p);
+    final yo = _yoPunto;
+    final yaRecogido = p.estado == 'recogido' || p.estado == 'en_camino';
+    return [
+      for (final t in todos)
+        // Ya recogido: el tramo hacia el restaurante quedó atrás y no se dibuja.
+        if (!(yaRecogido && t.alRestaurante))
+          (
+            alRestaurante: t.alRestaurante,
+            // Solo se recorta el tramo por el que va ahora; así la línea
+            // "se va borrando" conforme el repartidor avanza.
+            puntos: (yo != null &&
+                    t.alRestaurante == (p.estado == 'aceptado') &&
+                    p.estado != 'entregado')
+                ? _recortarDesde(t.puntos, yo)
+                : t.puntos,
+            porCalles: t.porCalles,
+          ),
+    ];
+  }
+
+  /// Quita del trazo lo que ya se recorrió: lo deja desde el punto de la línea
+  /// más cercano al repartidor. Si está lejos de la línea (se salió de la
+  /// ruta) no recorta nada y espera a que se recalcule.
+  List<LatLng> _recortarDesde(List<LatLng> puntos, LatLng yo) {
+    if (puntos.length < 2) return puntos;
+    final kx = 111320.0 * math.cos(yo.latitude * math.pi / 180);
+    const ky = 110540.0;
+    var mejor = -1;
+    var mejorM = double.infinity;
+    var mejorPunto = puntos.first;
+    for (var i = 0; i < puntos.length - 1; i++) {
+      final a = puntos[i];
+      final b = puntos[i + 1];
+      final abx = (b.longitude - a.longitude) * kx;
+      final aby = (b.latitude - a.latitude) * ky;
+      final apx = (yo.longitude - a.longitude) * kx;
+      final apy = (yo.latitude - a.latitude) * ky;
+      final largo2 = abx * abx + aby * aby;
+      final t = largo2 == 0
+          ? 0.0
+          : ((apx * abx + apy * aby) / largo2).clamp(0.0, 1.0);
+      final proy = LatLng(
+        a.latitude + (b.latitude - a.latitude) * t,
+        a.longitude + (b.longitude - a.longitude) * t,
+      );
+      final dx = (yo.longitude - proy.longitude) * kx;
+      final dy = (yo.latitude - proy.latitude) * ky;
+      final m = math.sqrt(dx * dx + dy * dy);
+      if (m < mejorM) {
+        mejorM = m;
+        mejor = i;
+        mejorPunto = proy;
+      }
+    }
+    if (mejor < 0 || mejorM > 120) return puntos;
+    return [mejorPunto, ...puntos.sublist(mejor + 1)];
+  }
+
+  List<({bool alRestaurante, List<LatLng> puntos, bool porCalles})>
+      _tramosSinRecortar(Pedido p) {
     final ruta = _rutaDe(p);
     if (ruta != null && ruta.tramos.isNotEmpty) {
       return [
@@ -1759,6 +1852,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           _Itinerario(
             recoger: p.restauranteDireccion ?? p.restaurante,
             entregar: p.direccionEntrega ?? 'Sin dirección',
+            cliente: p.clienteNombre,
           ),
           SizedBox(height: sep),
           _FranjaDatos(
@@ -1970,6 +2064,7 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
           _Itinerario(
             recoger: p.restauranteDireccion ?? p.restaurante,
             entregar: p.direccionEntrega ?? 'Sin dirección',
+            cliente: p.clienteNombre,
             detalleRecoger: detalle(_tramo(p.id, 'recoger')),
             detalleEntregar: detalle(_tramo(p.id, 'entregar')),
             recogido: !haciaRestaurante,
@@ -1986,31 +2081,44 @@ class _RepartidorScreenState extends State<RepartidorScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('CONTENIDO', style: _rotulo(size: 9.5)),
-                  const SizedBox(height: 4),
+                  Text('CONTENIDO', style: _rotulo(size: cel ? 8.5 : 9.5)),
+                  SizedBox(height: cel ? 2 : 4),
                   Text(
                     p.items.map((i) => '${i.cantidad}× ${i.nombre}').join(', '),
-                    style: AppTypography.body(size: 13),
+                    maxLines: cel ? 3 : null,
+                    overflow: cel ? TextOverflow.ellipsis : null,
+                    style: AppTypography.body(size: cel ? 12 : 13),
                   ),
-                  SizedBox(height: cel ? 6 : 12),
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      Text(dinero(p.total), style: _titulo(size: cel ? 18 : 22)),
-                      _etiquetaCobro(p.cobraEnEfectivo),
-                    ],
-                  ),
+                  SizedBox(height: cel ? 4 : 12),
+                  if (cel)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(dinero(p.total), style: _titulo(size: 16)),
+                        _etiquetaCobro(p.cobraEnEfectivo),
+                      ],
+                    )
+                  else
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        Text(dinero(p.total), style: _titulo(size: 22)),
+                        _etiquetaCobro(p.cobraEnEfectivo),
+                      ],
+                    ),
                 ],
               ),
             ),
           ],
           if (!_accionEnMapa(p)) ...[
-            SizedBox(height: cel ? 12 : 20),
-            Text('AVANCE DE LA ENTREGA', style: _rotulo()),
-            SizedBox(height: cel ? 6 : 10),
+            SizedBox(height: cel ? 8 : 20),
+            if (!cel) ...[
+              Text('AVANCE DE LA ENTREGA', style: _rotulo()),
+              const SizedBox(height: 10),
+            ],
             _ProgresoEntrega(estado: p.estado),
           ],
           // El botón de la acción siguiente del pedido elegido va fijo arriba
@@ -2533,6 +2641,9 @@ class _Itinerario extends StatelessWidget {
   final String? detalleRecoger;
   final String? detalleEntregar;
 
+  /// Nombre de quien recibe el pedido (se muestra en el rótulo del punto B).
+  final String? cliente;
+
   /// true cuando el pedido ya se recogió: el punto A aparece cumplido.
   final bool recogido;
 
@@ -2541,6 +2652,7 @@ class _Itinerario extends StatelessWidget {
     required this.entregar,
     this.detalleRecoger,
     this.detalleEntregar,
+    this.cliente,
     this.recogido = false,
   });
 
@@ -2568,7 +2680,9 @@ class _Itinerario extends StatelessWidget {
         _fila(
           cel: cel,
           nodo: const _Nodo(texto: 'B', relleno: false),
-          rotulo: 'ENTREGAR EN',
+          rotulo: (cliente != null && cliente!.trim().isNotEmpty)
+              ? 'ENTREGAR A ${cliente!.trim().toUpperCase()}'
+              : 'ENTREGAR EN',
           texto: entregar,
           detalle: detalleEntregar,
         ),
@@ -2592,7 +2706,12 @@ class _Itinerario extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(rotulo, style: _rotulo(size: cel ? 9 : 9.5)),
+              Text(
+                rotulo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _rotulo(size: cel ? 9 : 9.5),
+              ),
               const SizedBox(height: 1),
               Text(
                 texto,
@@ -2670,6 +2789,7 @@ class _ProgresoEntrega extends StatelessWidget {
   Widget build(BuildContext context) {
     const orden = ['aceptado', 'recogido', 'en_camino', 'entregado'];
     final actual = orden.indexOf(estado);
+    final cel = _esCel(context);
 
     return Row(
       children: [
@@ -2677,14 +2797,14 @@ class _ProgresoEntrega extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: EdgeInsets.only(right: i < _pasos.length - 1 ? 6 : 0),
-              child: _paso(i, actual),
+              child: _paso(i, actual, cel),
             ),
           ),
       ],
     );
   }
 
-  Widget _paso(int i, int actual) {
+  Widget _paso(int i, int actual, bool cel) {
     final hecho = actual >= i + 1;
     final enCurso = actual == i;
     final colorBarra =
@@ -2693,17 +2813,19 @@ class _ProgresoEntrega extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(height: 5, color: colorBarra),
-        const SizedBox(height: 8),
-        Text('0${i + 1}', style: _rotulo(size: 9.5)),
-        const SizedBox(height: 2),
+        Container(height: cel ? 4 : 5, color: colorBarra),
+        SizedBox(height: cel ? 4 : 8),
+        if (!cel) ...[
+          Text('0${i + 1}', style: _rotulo(size: 9.5)),
+          const SizedBox(height: 2),
+        ],
         Row(
           children: [
             Flexible(
               child: Text(
                 _pasos[i],
                 style: AppTypography.body(
-                  size: 12.5,
+                  size: cel ? 11.5 : 12.5,
                   weight: (hecho || enCurso) ? FontWeight.w700 : FontWeight.w500,
                   color: (hecho || enCurso) ? _tinta : AppColors.hint,
                 ),

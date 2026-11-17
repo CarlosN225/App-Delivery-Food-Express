@@ -6,6 +6,8 @@ class Restaurante {
   final String? latitud;
   final String? longitud;
   final double distanciaKm;
+  final double? calificacionPromedio;
+  final int totalResenas;
 
   Restaurante({
     required this.id,
@@ -15,6 +17,8 @@ class Restaurante {
     this.latitud,
     this.longitud,
     required this.distanciaKm,
+    this.calificacionPromedio,
+    this.totalResenas = 0,
   });
 
   factory Restaurante.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,8 @@ class Restaurante {
       latitud: json['latitud'],
       longitud: json['longitud'],
       distanciaKm: (json['distancia_km'] as num).toDouble(),
+      calificacionPromedio: (json['calificacion_promedio'] as num?)?.toDouble(),
+      totalResenas: (json['total_resenas'] as num?)?.toInt() ?? 0,
     );
   }
 }

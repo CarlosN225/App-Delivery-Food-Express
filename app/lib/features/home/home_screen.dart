@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/seguridad/sanitizador.dart';
 import '../../core/format.dart';
 import '../../core/location_service.dart';
+import '../../core/widgets.dart' show anchoLogoBarra;
 import '../admin/admin_screen.dart';
 import '../auth/auth_service.dart';
 import '../auth/login_screen.dart';
@@ -19,9 +20,11 @@ import '../delivery/repartidor_screen.dart';
 import '../maps/mapas_service.dart';
 import '../notificaciones/notificacion_service.dart';
 import '../notificaciones/notificaciones_screen.dart';
+import '../resenas/estrellas.dart';
 import '../restaurants/menu_screen.dart';
 import '../restaurants/restaurant_model.dart';
 import '../restaurants/restaurant_service.dart';
+import '../../core/imagenes.dart';
 
 class HomeScreen extends StatefulWidget {
   final UsuarioAutenticado usuario;
@@ -51,7 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Proporción de la imagen de cada tarjeta (ancho / alto)
   // y alto que ocupa el texto debajo de la imagen.
   static const double _proporcionImagen = 2.0;
-  static const double _altoTextoTarjeta = 116;
+  static const double _altoTextoTarjeta = 142;
 
   // Prefijo de las fotos por categoría:
   // assets/images/<prefijo>-pizza.png, -tacos.png, etc.
@@ -804,7 +807,16 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'assets/images/$_prefijoFoto-general.png';
     }
   }
-
+  // Foto propia del restaurante; si no existe, la de su categoría.
+  List<String> _fotosDe(Restaurante r, String categoria) {
+    final slug = Imagenes.slug(r.nombre);
+    return [
+      'assets/images/restaurantes/$slug.jpg',
+      'assets/images/restaurantes/$slug.png',
+      'assets/images/restaurantes/$slug.webp',
+      _imagenCategoria(categoria),
+    ];
+  }
   List<Restaurante> get restaurantesFiltrados {
     final texto = _normalizar(busqueda.trim());
 
@@ -1409,7 +1421,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Row(
               children: [
-                _logo(98),
+                _logo(anchoLogoBarra(context)),
                 const Spacer(),
                 if (_esCliente)
                   IconButton(
@@ -1463,7 +1475,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          _logo(126),
+          _logo(anchoLogoBarra(context)),
           const SizedBox(width: 40),
           _ubicacion(),
           const SizedBox(width: 40),
@@ -2255,10 +2267,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.asset(
-                    _imagenCategoria(categoria),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _sinImagen(),
+                  Imagenes.primeraImagen(
+                    _fotosDe(restaurante, categoria),
+                    _sinImagen(),
                   ),
                   if (etiqueta.isNotEmpty)
                     Positioned(
@@ -2319,6 +2330,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 4),
+                  ResumenCalificacion(
+                    promedio: restaurante.calificacionPromedio,
+                    total: restaurante.totalResenas,
+                    color: grisTexto,
                   ),
                   const SizedBox(height: 4),
                   // El envío real depende de la distancia

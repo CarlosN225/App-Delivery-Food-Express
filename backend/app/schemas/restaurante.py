@@ -10,3 +10,5 @@ class RestauranteCercano(BaseModel):
     latitud: Optional[str] = None
     longitud: Optional[str] = None
     distancia_km: float
+    calificacion_promedio: Optional[float] = None
+    total_resenas: int = 0
