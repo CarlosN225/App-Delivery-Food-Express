@@ -36,12 +36,12 @@ Notificaciones push (Firebase Cloud Messaging): El envío ya se encuentra prepar
 
 Incorporación de restaurantes reales: Pendiente. Actualmente el sistema opera con 20 restaurantes de demostración precargados de manera controlada en la base de datos.
 
-Imágenes de productos en los menús: En proceso de integración para enriquecer la experiencia visual del usuario al explorar los platillos.
+Imágenes de productos en los menús: Completado. Los 86 productos de los 20 restaurantes de demostración cuentan con su imagen, optimizada en formato WebP (de 269.2 MB a 11.2 MB).
 
 Prioridad Baja
-Detección explícita de desvío de ruta del repartidor: Pendiente. Hoy en día el sistema recalcula la ruta de forma automática solo cuando el repartidor se desplaza más de 200 metros del trayecto previsto.
+Detección explícita de desvío de ruta del repartidor: Pendiente. Hoy en día el sistema recalcula la ruta de forma automática cuando el repartidor se desplaza más de 200 metros respecto al punto donde se solicitó la última ruta.
 
-Firma del APK con llave propia y cambio de identificador: Pendiente. Es un requisito técnico indispensable para proceder con la publicación oficial en Google Play.
+Cambio del identificador de la aplicación: Pendiente. El APK de release ya se firma con una llave propia; falta reemplazar el identificador temporal (com.example) por uno definitivo, requisito para publicar en Google Play.
 
 4. Criterio de priorización
 La estrategia para ordenar los requerimientos sigue una jerarquía operativa clara: primero se resuelven los bloqueos críticos para la puesta en producción (como el servidor en la nube y la pasarela de pagos reales); en segundo lugar se abordan las mejoras que enriquecen directamente la experiencia del usuario (notificaciones y recursos visuales); y finalmente se atienden los ajustes técnicos o refinamientos de funcionalidades existentes.
