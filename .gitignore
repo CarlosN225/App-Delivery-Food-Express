@@ -6,3 +6,5 @@ __pycache__/
 build/
 .idea/
 *.iml
+app/firebase.json
+imagenes_originales/
