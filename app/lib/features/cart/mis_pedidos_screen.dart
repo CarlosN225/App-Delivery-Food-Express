@@ -9,6 +9,9 @@ import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
+import '../resenas/calificar_dialog.dart';
+import '../resenas/estrellas.dart';
+import '../resenas/resena_service.dart';
 import 'pago_screen.dart';
 import 'rastreo_screen.dart';
 
@@ -73,6 +76,8 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
   ];
 
   List<Pedido> pedidos = [];
+  // Reseñas que ya hice, por número de pedido (Sprint 5, historia #28).
+  Map<int, MiResena> _misResenas = {};
   bool cargando = true;
   String? error;
   _Filtro filtro = _Filtro.todos;
@@ -109,8 +114,16 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
     }
     try {
       final resultado = await PedidoService.misPedidos(widget.usuario.token);
+      Map<int, MiResena> resenas = _misResenas;
+      try {
+        final lista = await ResenaService.mias(widget.usuario.token);
+        resenas = {for (final r in lista) r.pedidoId: r};
+      } catch (_) {
+        // Sin reseñas la pantalla sigue funcionando; solo no se ven las estrellas.
+      }
       if (!mounted) return;
       setState(() {
+        _misResenas = resenas;
         pedidos = resultado;
         cargando = false;
         error = null;
@@ -183,6 +196,15 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
       if (mounted) showAppSnackBar(context, e.mensaje);
     }
     await _cargar(silencioso: true);
+  }
+
+  Future<void> _calificar(Pedido pedido) async {
+    final guardada = await mostrarCalificar(
+      context,
+      token: widget.usuario.token,
+      pedido: pedido,
+    );
+    if (guardada && mounted) await _cargar(silencioso: true);
   }
 
   void _rastrear(Pedido pedido) {
@@ -297,51 +319,13 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
   // BARRA SUPERIOR
   // =====================================================
 
-  Widget _botonBarra(IconData icono, String tooltip, VoidCallback onTap) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: grisBorde),
-          ),
-          child: Icon(icono, color: verdeOscuro),
-        ),
-      ),
-    );
-  }
-
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          _botonBarra(Icons.arrow_back, 'Regresar', () => Navigator.pop(context)),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text('Mis pedidos', style: AppTypography.title(size: 20)),
-          ),
-          _botonBarra(Icons.refresh, 'Actualizar', _cargar),
-          const SizedBox(width: 14),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+    return BarraSuperiorFE(
+      titulo: 'Mis pedidos',
+      margen: margen,
+      acciones: [
+        BotonBarraFE(icono: Icons.refresh, tooltip: 'Actualizar', onTap: _cargar),
+      ],
     );
   }
 
@@ -535,6 +519,31 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
           icono: Icons.location_on_outlined,
           color: turquesa,
         ),
+      if (p.estado == 'entregado')
+        _misResenas.containsKey(p.id)
+            ? Container(
+                height: 32,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(border: Border.all(color: grisBorde)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('CALIFICADO', style: _rotulo(size: 9.5)),
+                    const SizedBox(width: 6),
+                    Estrellas(
+                      valor: _misResenas[p.id]!.calificacionRestaurante.toDouble(),
+                      tamano: 13,
+                    ),
+                  ],
+                ),
+              )
+            : _boton(
+                'Calificar',
+                () => _calificar(p),
+                icono: Icons.star_border,
+                relleno: true,
+                color: turquesa,
+              ),
       if (puedeCancelar)
         _boton('Cancelar', () => _cancelar(p), color: grisTexto),
       if (puedeCancelar && p.pagoPendiente)

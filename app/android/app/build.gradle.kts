@@ -1,3 +1,21 @@
+import java.util.Properties
+
+// Llave de Google Maps para Android. NO va en el repositorio: se lee de
+// ~/.gradle/gradle.properties (MAPS_API_KEY=...) o de android/local.properties.
+val propiedadesLocales = Properties().apply {
+    val archivo = rootProject.file("local.properties")
+    if (archivo.exists()) archivo.inputStream().use { load(it) }
+}
+
+// Firma de la versión release. key.properties NO va en el repositorio (está en
+// android/.gitignore). Si no existe, el release se firma con la llave de debug
+// para que los compañeros puedan compilar sin tener la llave del equipo.
+val propiedadesFirma = Properties().apply {
+    val archivo = rootProject.file("key.properties")
+    if (archivo.exists()) archivo.inputStream().use { load(it) }
+}
+val hayLlaveDeFirma = propiedadesFirma.getProperty("storeFile") != null
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -27,13 +45,30 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["MAPS_API_KEY"] =
+            (project.findProperty("MAPS_API_KEY") as String?)
+                ?: propiedadesLocales.getProperty("MAPS_API_KEY", "")
+    }
+
+    signingConfigs {
+        if (hayLlaveDeFirma) {
+            create("release") {
+                keyAlias = propiedadesFirma.getProperty("keyAlias")
+                keyPassword = propiedadesFirma.getProperty("keyPassword")
+                storeFile = file(propiedadesFirma.getProperty("storeFile"))
+                storePassword = propiedadesFirma.getProperty("storePassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Con llave propia (key.properties) se firma con ella; si no, con la de debug.
+            signingConfig = if (hayLlaveDeFirma) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

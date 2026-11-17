@@ -467,3 +467,161 @@ class OutlineActionButton extends StatelessWidget {
     );
   }
 }
+
+
+// =====================================================================
+// BARRA SUPERIOR COMPARTIDA
+// =====================================================================
+// Todas las pantallas internas usan la misma barra: misma altura, mismos
+// botones cuadrados y el logo recortado al mismo tamaño. Antes cada pantalla
+// ponía el PNG completo (con mucho margen transparente) y unas se veían con
+// el logo chico y otras grande.
+
+const Color _bordeBarraFE = Color(0xFFD3E2DF);
+
+bool _esAngosta(BuildContext context) => MediaQuery.of(context).size.width < 600;
+
+/// Alto de la barra superior: 64 en celular y 72 en pantalla ancha.
+double alturaBarraFE(BuildContext context) => _esAngosta(context) ? 64 : 72;
+
+/// Ancho del logo de la barra (ya recortado): 76 en celular y 104 en pantalla ancha.
+double anchoLogoBarra(BuildContext context) => _esAngosta(context) ? 76 : 104;
+
+/// Logo de Food Express recortado a su parte visible. El PNG trae mucho
+/// margen transparente; así queda del tamaño y la posición correctos.
+class LogoFE extends StatelessWidget {
+  final double ancho;
+
+  const LogoFE({super.key, required this.ancho});
+
+  @override
+  Widget build(BuildContext context) {
+    const anchoPng = 1672.0;
+    const altoPng = 941.0;
+    const margenIzq = 123.0;
+    const margenSup = 200.0;
+    const anchoVisible = 1471.0;
+    const altoVisible = 524.0;
+
+    final escala = ancho / anchoVisible;
+
+    return SizedBox(
+      width: ancho,
+      height: altoVisible * escala,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          Positioned(
+            left: -margenIzq * escala,
+            top: -margenSup * escala,
+            width: anchoPng * escala,
+            height: altoPng * escala,
+            child: Image.asset(
+              'assets/images/logo-food-express.png',
+              fit: BoxFit.fill,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Botón cuadrado de la barra superior (regresar, actualizar, etc.).
+/// Con [onTap] nulo se ve apagado.
+class BotonBarraFE extends StatelessWidget {
+  final IconData icono;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  const BotonBarraFE({
+    super.key,
+    required this.icono,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lado = _esAngosta(context) ? 42.0 : 46.0;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: lado,
+          height: lado,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: _bordeBarraFE),
+          ),
+          child: Icon(
+            icono,
+            color: onTap == null ? _bordeBarraFE : AppColors.primaryDark,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Barra superior estándar: [regresar] título ... [acciones] | logo.
+class BarraSuperiorFE extends StatelessWidget {
+  final String titulo;
+  final double margen;
+  final bool conRegreso;
+  final VoidCallback? alRegresar;
+  final List<Widget> acciones;
+
+  const BarraSuperiorFE({
+    super.key,
+    required this.titulo,
+    this.margen = 20,
+    this.conRegreso = true,
+    this.alRegresar,
+    this.acciones = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final angosta = _esAngosta(context);
+    final lateral = angosta && margen > 14 ? 14.0 : margen;
+
+    return Container(
+      height: alturaBarraFE(context),
+      padding: EdgeInsets.symmetric(horizontal: lateral),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: _bordeBarraFE)),
+      ),
+      child: Row(
+        children: [
+          if (conRegreso) ...[
+            BotonBarraFE(
+              icono: Icons.arrow_back,
+              tooltip: 'Regresar',
+              onTap: alRegresar ?? () => Navigator.of(context).maybePop(),
+            ),
+            SizedBox(width: angosta ? 10 : 16),
+          ],
+          Expanded(
+            child: Text(
+              titulo,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.title(size: angosta ? 17 : 20),
+            ),
+          ),
+          for (final accion in acciones) ...[
+            accion,
+            SizedBox(width: angosta ? 6 : 10),
+          ],
+          SizedBox(width: angosta ? 4 : 4),
+          Container(width: 1, height: 28, color: _bordeBarraFE),
+          SizedBox(width: angosta ? 10 : 14),
+          LogoFE(ancho: anchoLogoBarra(context)),
+        ],
+      ),
+    );
+  }
+}

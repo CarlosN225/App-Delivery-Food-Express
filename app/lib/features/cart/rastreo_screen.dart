@@ -6,9 +6,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/api_client.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import '../auth/auth_service.dart';
 import '../delivery/pedido_model.dart';
 import '../delivery/pedido_service.dart';
+import '../maps/icono_moto.dart';
 import '../maps/mapas_service.dart';
 
 /// Rastreo del pedido en tiempo real para el cliente (Sprint 4, historia #14).
@@ -100,12 +102,29 @@ class _RastreoScreenState extends State<RastreoScreen> {
   bool cargando = true;
   Timer? _temporizador;
 
+  // Moto del repartidor: ícono propio y movimiento suave entre posiciones.
+  BitmapDescriptor? _iconoMoto;
+  LatLng? _motoVisible;
+  LatLng? _motoDesde;
+  LatLng? _motoHasta;
+  DateTime? _motoInicio;
+  Timer? _animacionMoto;
+  // Igual al intervalo con que el repartidor manda su posición (3 s).
+  static const Duration _duracionMovimiento = Duration(milliseconds: 3000);
+
   @override
   void initState() {
     super.initState();
+    crearIconoMoto(color: azulTramo).then((icono) {
+      if (mounted) setState(() => _iconoMoto = icono);
+    }).catchError((Object e) {
+      // Sin ícono propio se usa el marcador azul de Google.
+      debugPrint('No se pudo crear el ícono de moto: $e');
+    });
     _cargar();
+    // Cada 2 s: la moto se desliza entre una posición y la siguiente.
     _temporizador = Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 2),
       (_) => _cargar(),
     );
   }
@@ -113,6 +132,7 @@ class _RastreoScreenState extends State<RastreoScreen> {
   @override
   void dispose() {
     _temporizador?.cancel();
+    _animacionMoto?.cancel();
     _mapa?.dispose();
     super.dispose();
   }
@@ -132,6 +152,7 @@ class _RastreoScreenState extends State<RastreoScreen> {
       if (s.estado == 'entregado' || s.estado == 'cancelado') {
         _temporizador?.cancel();
       }
+      _moverMoto(_punto(s.repartidorLatitud, s.repartidorLongitud));
       _actualizarRuta(s);
     } on ApiException catch (e) {
       _falla(e.mensaje);
@@ -146,6 +167,53 @@ class _RastreoScreenState extends State<RastreoScreen> {
     setState(() {
       error = mensaje;
       cargando = false;
+    });
+  }
+
+  /// Desliza la moto desde donde se veía hasta la nueva posición, para que
+  /// avance sobre la ruta en lugar de dar saltos cada vez que llega un dato.
+  void _moverMoto(LatLng? destino) {
+    if (destino == null) {
+      _animacionMoto?.cancel();
+      _motoVisible = null;
+      _motoHasta = null;
+      return;
+    }
+    final actual = _motoVisible;
+    // Primera posición, o un salto muy grande: se coloca directo.
+    if (actual == null || _metros(actual, destino) > 3000) {
+      _animacionMoto?.cancel();
+      setState(() {
+        _motoVisible = destino;
+        _motoHasta = destino;
+      });
+      return;
+    }
+    final meta = _motoHasta;
+    if (meta != null && _metros(meta, destino) < 1) return;
+
+    _motoDesde = actual;
+    _motoHasta = destino;
+    _motoInicio = DateTime.now();
+    _animacionMoto?.cancel();
+    _animacionMoto = Timer.periodic(const Duration(milliseconds: 100), (t) {
+      final desde = _motoDesde;
+      final hasta = _motoHasta;
+      final inicio = _motoInicio;
+      if (!mounted || desde == null || hasta == null || inicio == null) {
+        t.cancel();
+        return;
+      }
+      final avance = (DateTime.now().difference(inicio).inMilliseconds /
+              _duracionMovimiento.inMilliseconds)
+          .clamp(0.0, 1.0);
+      setState(() {
+        _motoVisible = LatLng(
+          desde.latitude + (hasta.latitude - desde.latitude) * avance,
+          desde.longitude + (hasta.longitude - desde.longitude) * avance,
+        );
+      });
+      if (avance >= 1) t.cancel();
     });
   }
 
@@ -378,7 +446,8 @@ class _RastreoScreenState extends State<RastreoScreen> {
   Widget _mapaWidget(Seguimiento s) {
     final restaurante = _punto(s.restauranteLatitud, s.restauranteLongitud);
     final cliente = _punto(s.clienteLatitud, s.clienteLongitud);
-    final repartidor = _punto(s.repartidorLatitud, s.repartidorLongitud);
+    final repartidor =
+        _motoVisible ?? _punto(s.repartidorLatitud, s.repartidorLongitud);
     final enCurso = _enCurso(s.estado);
     final mostrarRestaurante =
         s.estado == 'pendiente' || s.estado == 'aceptado' || !enCurso;
@@ -394,11 +463,16 @@ class _RastreoScreenState extends State<RastreoScreen> {
       if (cliente != null)
         _marcador('cliente', cliente, 'Tu domicilio', BitmapDescriptor.hueRed),
       if (enCurso && repartidor != null)
-        _marcador(
-          'repartidor',
-          repartidor,
-          s.repartidorNombre ?? 'Tu repartidor',
-          BitmapDescriptor.hueAzure,
+        Marker(
+          markerId: const MarkerId('repartidor'),
+          position: repartidor,
+          infoWindow: InfoWindow(title: s.repartidorNombre ?? 'Tu repartidor'),
+          icon: _iconoMoto ?? BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueAzure,
+          ),
+          // La moto es un círculo: su centro va sobre la posición.
+          anchor: _iconoMoto != null ? const Offset(0.5, 0.5) : const Offset(0.5, 1.0),
+          zIndexInt: 10,
         ),
     };
 
@@ -500,47 +574,10 @@ class _RastreoScreenState extends State<RastreoScreen> {
   // =====================================================
 
   Widget _barraSuperior(double margen) {
-    return Container(
-      height: 72,
-      padding: EdgeInsets.symmetric(horizontal: margen),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: grisBorde)),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: grisBorde),
-              ),
-              child: const Icon(Icons.arrow_back, color: verdeOscuro),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              'Rastreo de tu pedido',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.title(size: 20),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Container(width: 1, height: 32, color: grisBorde),
-          const SizedBox(width: 14),
-          Image.asset(
-            'assets/images/logo-food-express.png',
-            width: 110,
-            height: 40,
-            fit: BoxFit.contain,
-          ),
-        ],
-      ),
+    final angosta = MediaQuery.of(context).size.width < 600;
+    return BarraSuperiorFE(
+      titulo: angosta ? 'Rastreo' : 'Rastreo de tu pedido',
+      margen: margen,
     );
   }
 

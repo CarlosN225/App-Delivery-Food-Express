@@ -188,7 +188,10 @@ def test_estado_de_entrega_y_cobro_en_efectivo(client, menu, cliente, repartidor
     assert cambiar("entregado").status_code == 400  # ya terminado
 
 
-def test_un_repartidor_atiende_un_pedido_a_la_vez(client, menu, cliente, repartidor):
+def test_un_repartidor_atiende_un_pedido_a_la_vez(client, menu, cliente, repartidor, monkeypatch):
+    # Desde el Sprint 5 el límite normal es 2; aquí se prueba que sigue siendo configurable.
+    from app.routers import pedidos as pedidos_router
+    monkeypatch.setattr(pedidos_router, "MAX_PEDIDOS_EN_CURSO", 1)
     a = client.post("/pedidos", headers=cliente, json=_pedido_body(menu)).json()["id"]
     b = client.post("/pedidos", headers=cliente, json=_pedido_body(menu)).json()["id"]
 

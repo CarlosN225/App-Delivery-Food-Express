@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart' show LogoFE, alturaBarraFE, anchoLogoBarra;
 import '../auth/auth_service.dart';
+import '../resenas/estrellas.dart';
 
 // ---------------------------------------------------------------- estilo
 // Mismo lenguaje que el panel del repartidor: esquinas rectas, líneas
@@ -112,6 +114,8 @@ class _Entrega {
 
 class _Resumen {
   final bool enEntrega;
+  final double? calificacion; // promedio de las reseñas que recibió
+  final int totalResenas;
   final _Cifras hoy;
   final _Cifras semana;
   final _Cifras mes;
@@ -120,6 +124,8 @@ class _Resumen {
 
   const _Resumen({
     required this.enEntrega,
+    this.calificacion,
+    this.totalResenas = 0,
     required this.hoy,
     required this.semana,
     required this.mes,
@@ -129,6 +135,13 @@ class _Resumen {
 
   factory _Resumen.fromJson(Map<String, dynamic> j) => _Resumen(
         enEntrega: j['en_entrega'] == true,
+        calificacion:
+            ((j['calificacion'] as Map<String, dynamic>?)?['promedio'] as num?)
+                ?.toDouble(),
+        totalResenas:
+            ((j['calificacion'] as Map<String, dynamic>?)?['total'] as num?)
+                    ?.toInt() ??
+                0,
         hoy: _Cifras.fromJson(j['hoy'] as Map<String, dynamic>),
         semana: _Cifras.fromJson(j['semana'] as Map<String, dynamic>),
         mes: _Cifras.fromJson(j['mes'] as Map<String, dynamic>),
@@ -277,7 +290,6 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
   }
 
   Widget _barra() {
-    final angosta = MediaQuery.of(context).size.width < 600;
     return Material(
       color: Colors.white,
       child: Container(
@@ -287,7 +299,7 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
         child: SafeArea(
           bottom: false,
           child: SizedBox(
-            height: 64,
+            height: alturaBarraFE(context),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -297,12 +309,7 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
                     icon: const Icon(Icons.arrow_back, color: _tinta),
                     onPressed: () => Navigator.of(context).maybePop(),
                   ),
-                  Image.asset(
-                    'assets/images/logo-food-express.png',
-                    width: angosta ? 110 : 150,
-                    height: 46,
-                    fit: BoxFit.contain,
-                  ),
+                  LogoFE(ancho: anchoLogoBarra(context)),
                   const SizedBox(width: 14),
                   Container(
                     padding:
@@ -503,6 +510,12 @@ class _PerfilRepartidorScreenState extends State<PerfilRepartidorScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTypography.body(color: AppColors.hint, size: 12),
+              ),
+              const SizedBox(height: 2),
+              ResumenCalificacion(
+                promedio: _datos?.calificacion,
+                total: _datos?.totalResenas ?? 0,
+                tamano: 12,
               ),
             ],
           ),

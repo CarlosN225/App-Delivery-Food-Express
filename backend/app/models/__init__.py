@@ -10,6 +10,7 @@ from app.models.pedido import (
 from app.models.restaurante import Restaurante
 from app.models.producto import Producto
 from app.models.notificacion import Notificacion, TokenDispositivo
+from app.models.resena import Resena
 
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "Producto",
     "Notificacion",
     "TokenDispositivo",
+    "Resena",
 ]

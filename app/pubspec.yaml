@@ -25,8 +25,24 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
   assets:
-    - assets/images/
+    - assets/images/    
+    - assets/images/restaurantes/
+    - assets/images/productos/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/logo_food_express.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/logo_food_express.png"
+  adaptive_icon_foreground_inset: 20
+  web:
+    generate: true
+    image_path: "assets/images/logo_food_express.png"
+    background_color: "#FFFFFF"
+    theme_color: "#0AA89A"
