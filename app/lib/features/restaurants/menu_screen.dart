@@ -877,11 +877,13 @@ class _MenuScreenState extends State<MenuScreen> {
     final descripcion = (producto.descripcion ?? '').trim();
     final cantidad = carrito.cantidadDe(producto.id);
     final enCarrito = cantidad > 0;
-    final anchoFoto = compacto ? 118.0 : 180.0;
+    // La tarjeta mide lo mismo que la foto: la foto es un cuadrado que ocupa
+    // todo el lado izquierdo, sin márgenes, y la tarjeta tiene ese mismo alto.
+    final lado = compacto ? 136.0 : 176.0;
 
-    // La foto es un rectángulo vertical que ocupa todo el alto de la tarjeta.
     final foto = SizedBox(
-      width: anchoFoto,
+      width: lado,
+      height: lado,
       child: Stack(
         children: [
           Positioned.fill(
@@ -893,7 +895,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 child: Icon(
                   Imagenes.iconoDeProducto(producto),
                   color: turquesa,
-                  size: anchoFoto * 0.42,
+                  size: lado * 0.42,
                 ),
               ),
             ),
@@ -926,67 +928,71 @@ class _MenuScreenState extends State<MenuScreen> {
           width: enCarrito ? 1.6 : 1,
         ),
       ),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: compacto ? 168 : 236),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              foto,
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.all(compacto ? 14 : 18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            producto.nombre,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTypography.body(
-                              weight: FontWeight.w700,
-                              size: compacto ? 15.5 : 17.5,
+      child: SizedBox(
+        height: lado,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            foto,
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.all(compacto ? 12 : 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: ClipRect(
+                        child: SingleChildScrollView(
+                          physics: const NeverScrollableScrollPhysics(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                producto.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTypography.body(
+                                  weight: FontWeight.w700,
+                                  size: compacto ? 15.5 : 17.5,
+                                ),
+                              ),
+                              if (descripcion.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  descripcion,
+                                  maxLines: compacto ? 2 : 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTypography.body(
+                                    color: grisTexto,
+                                    weight: FontWeight.w400,
+                                    size: 13,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            dinero(producto.precio),
+                            style: AppTypography.title(
+                              size: compacto ? 18 : 22,
                             ),
                           ),
-                          if (descripcion.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              descripcion,
-                              maxLines: compacto ? 3 : 4,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.body(
-                                color: grisTexto,
-                                weight: FontWeight.w400,
-                                size: 13,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              dinero(producto.precio),
-                              style: AppTypography.title(
-                                size: compacto ? 18 : 22,
-                              ),
-                            ),
-                          ),
-                          _controlCantidad(producto, conTexto: !compacto),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                        _controlCantidad(producto, conTexto: !compacto),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
