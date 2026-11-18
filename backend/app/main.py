@@ -19,8 +19,9 @@ instalar_filtro_pii()
 
 app = FastAPI(
     title="Food Express API",
-    description="Backend del proyecto Food Express — Sprint 3: carrito, pagos y ruta óptima.",
-    version="0.3.0",
+    description="Backend del proyecto Food Express — Sprints 1 a 6: pedidos, pagos, rutas, reseñas, notificaciones y administración.",
+    version="1.0.0",
+    
 )
 
 # Habilitado en modo abierto para desarrollo, así la app Flutter (móvil o web)
@@ -47,4 +48,4 @@ app.include_router(resenas.router)
 
 @app.get("/", tags=["Salud"])
 def estado():
-    return {"status": "ok", "proyecto": "Food Express", "sprint": "Sprint 3"}
+       return {"status": "ok", "proyecto": "Food Express", "sprint": "Sprint 6"}

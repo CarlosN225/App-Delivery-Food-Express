@@ -177,103 +177,218 @@ class _RestauranteFormScreenState extends State<RestauranteFormScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: buildAppBar(_editando ? 'Editar restaurante' : 'Nuevo restaurante'),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AppTextField(
-                controller: _nombre,
-                hint: 'Nombre del restaurante',
-                icon: Icons.storefront_outlined,
-                validator: _validarNombre,
-              ),
-              const SizedBox(height: 14),
-              AppTextField(
-                controller: _direccion,
-                hint: 'Dirección',
-                icon: Icons.location_on_outlined,
-              ),
-              const SizedBox(height: 14),
-              AppTextField(
-                controller: _categoria,
-                hint: 'Categoría (ej. Pizzas)',
-                icon: Icons.restaurant_menu,
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'Ubicación',
-                style: AppTypography.body(weight: FontWeight.w600, size: 17),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Con coordenadas, los clientes lo encuentran en la búsqueda por cercanía.',
-                style: AppTypography.body(color: AppColors.hint, size: 13),
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _latitud,
-                hint: 'Latitud (ej. 19.6010)',
-                icon: Icons.explore_outlined,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                validator: (v) => _validarCoordenada(v, esLatitud: true),
-              ),
-              const SizedBox(height: 14),
-              AppTextField(
-                controller: _longitud,
-                hint: 'Longitud (ej. -99.3085)',
-                icon: Icons.explore_outlined,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                validator: (v) => _validarCoordenada(v, esLatitud: false),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _ubicando ? null : _usarMiUbicacion,
-                icon: const Icon(Icons.my_location),
-                label: Text(
-                  _ubicando ? 'Buscando…' : 'Usar mi ubicación actual',
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primaryDark,
-                  side: const BorderSide(color: AppColors.primary),
-                  minimumSize: const Size.fromHeight(46),
-                ),
-              ),
-              const SizedBox(height: 26),
-              PrimaryButton(
-                label: _editando ? 'Guardar cambios' : 'Crear restaurante',
-                loading: _guardando,
-                onPressed: _guardar,
-              ),
-              if (_editando) ...[
-                const SizedBox(height: 14),
-                OutlinedButton.icon(
-                  onPressed: _guardando ? null : _eliminar,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Eliminar restaurante'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.error,
-                    side: const BorderSide(color: AppColors.error),
-                    minimumSize: const Size.fromHeight(46),
-                  ),
-                ),
-              ],
-            ],
+  static const _borde = Color(0xFFD3E2DF);
+  static const _menta = Color(0xFFE5F5F3);
+
+  TextStyle _rotulo() {
+    return AppTypography.body(
+      color: AppColors.hint,
+      weight: FontWeight.w700,
+      size: 10,
+    ).copyWith(letterSpacing: 1.5);
+  }
+
+  OutlineInputBorder _marco(Color color, {double ancho = 1}) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.zero,
+      borderSide: BorderSide(color: color, width: ancho),
+    );
+  }
+
+  /// Campo de texto de esquinas rectas, igual que el resto de la app.
+  Widget _campo({
+    required TextEditingController controller,
+    required String etiqueta,
+    required String hint,
+    TextInputType? teclado,
+    String? Function(String?)? validar,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(etiqueta.toUpperCase(), style: _rotulo()),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          keyboardType: teclado,
+          validator: validar,
+          style: AppTypography.body(),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: AppTypography.body(color: AppColors.hint, size: 14),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+            border: _marco(_borde),
+            enabledBorder: _marco(_borde),
+            focusedBorder: _marco(AppColors.primary, ancho: 1.6),
+            errorBorder: _marco(AppColors.error),
+            focusedErrorBorder: _marco(AppColors.error, ancho: 1.6),
           ),
         ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decimales = const TextInputType.numberWithOptions(
+      decimal: true,
+      signed: true,
+    );
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(
+        children: [
+          BarraSuperiorFE(
+            titulo: _editando ? 'Editar restaurante' : 'Nuevo restaurante',
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: _menta,
+                border: Border.all(color: _borde),
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('ADMINISTRACIÓN', style: _rotulo()),
+                    const SizedBox(height: 4),
+                    Text(
+                      _editando ? 'Editar restaurante' : 'Nuevo restaurante',
+                      style: AppTypography.title(size: 26),
+                    ),
+                    const SizedBox(height: 22),
+                    _campo(
+                      controller: _nombre,
+                      etiqueta: 'Nombre',
+                      hint: 'Nombre del restaurante',
+                      validar: _validarNombre,
+                    ),
+                    const SizedBox(height: 16),
+                    _campo(
+                      controller: _direccion,
+                      etiqueta: 'Dirección',
+                      hint: 'Calle, colonia y municipio',
+                    ),
+                    const SizedBox(height: 16),
+                    _campo(
+                      controller: _categoria,
+                      etiqueta: 'Categoría',
+                      hint: 'Ej. Pizzas',
+                    ),
+                    const SizedBox(height: 26),
+                    Text('UBICACIÓN', style: _rotulo()),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Con coordenadas, los clientes lo encuentran en la búsqueda por cercanía.',
+                      style: AppTypography.body(color: AppColors.hint, size: 13),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _campo(
+                            controller: _latitud,
+                            etiqueta: 'Latitud',
+                            hint: 'Ej. 19.6010',
+                            teclado: decimales,
+                            validar: (v) =>
+                                _validarCoordenada(v, esLatitud: true),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: _campo(
+                            controller: _longitud,
+                            etiqueta: 'Longitud',
+                            hint: 'Ej. -99.3085',
+                            teclado: decimales,
+                            validar: (v) =>
+                                _validarCoordenada(v, esLatitud: false),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: _ubicando ? null : _usarMiUbicacion,
+                      icon: const Icon(Icons.my_location),
+                      label: Text(
+                        _ubicando ? 'Buscando…' : 'Usar mi ubicación actual',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primaryDark,
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: const RoundedRectangleBorder(),
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                    const SizedBox(height: 26),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: FilledButton(
+                        onPressed: _guardando ? null : _guardar,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppColors.primary,
+                          disabledForegroundColor: Colors.white,
+                          shape: const RoundedRectangleBorder(),
+                        ),
+                        child: _guardando
+                            ? const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                _editando
+                                    ? 'Guardar cambios'
+                                    : 'Crear restaurante',
+                                style: AppTypography.button(),
+                              ),
+                      ),
+                    ),
+                    if (_editando) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _guardando ? null : _eliminar,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Eliminar restaurante'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.error,
+                          side: const BorderSide(color: AppColors.error),
+                          shape: const RoundedRectangleBorder(),
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+        ],
       ),
     );
   }

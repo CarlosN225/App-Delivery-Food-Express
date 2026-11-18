@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../admin/admin_screen.dart';
 import '../delivery/repartidor_screen.dart';
 import '../home/home_screen.dart';
 import 'auth_service.dart';
 import 'login_screen.dart';
 
-/// Pantalla que corresponde a cada rol al entrar:
-/// el repartidor va a su panel; el cliente y el administrador, al inicio.
+/// Pantalla que corresponde a cada rol al entrar: el repartidor va a su
+/// panel, el administrador al suyo y el cliente al inicio con los restaurantes.
 Widget pantallaInicialPara(UsuarioAutenticado usuario) {
-  return usuario.rol == 'repartidor'
-      ? RepartidorScreen(usuario: usuario)
-      : HomeScreen(usuario: usuario);
+  switch (usuario.rol) {
+    case 'repartidor':
+      return RepartidorScreen(usuario: usuario);
+    case 'administrador':
+      return AdminScreen(usuario: usuario);
+    default:
+      return HomeScreen(usuario: usuario);
+  }
 }
 
 /// Puerta de entrada de la app. Si hay una sesión guardada y el servidor
