@@ -10,6 +10,7 @@ Future<bool> confirmarAccion(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
+      shape: const RoundedRectangleBorder(),
       title: Text(titulo),
       content: Text(mensaje),
       actions: [
